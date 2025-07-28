@@ -1,0 +1,37 @@
+id,name,state_id,rating_area_count,service_area_count
+41001,Baker County,OR,1,5
+41003,Benton County,OR,1,6
+41005,Clackamas County,OR,1,9
+41007,Clatsop County,OR,1,6
+41009,Columbia County,OR,1,7
+41011,Coos County,OR,1,5
+41013,Crook County,OR,1,6
+41015,Curry County,OR,1,5
+41017,Deschutes County,OR,1,6
+41019,Douglas County,OR,1,6
+41021,Gilliam County,OR,1,5
+41023,Grant County,OR,1,5
+41025,Harney County,OR,1,5
+41027,Hood River County,OR,1,8
+41029,Jackson County,OR,1,6
+41031,Jefferson County,OR,1,6
+41033,Josephine County,OR,1,5
+41035,Klamath County,OR,1,5
+41037,Lake County,OR,1,5
+41039,Lane County,OR,1,7
+41041,Lincoln County,OR,1,5
+41043,Linn County,OR,1,6
+41045,Malheur County,OR,1,5
+41047,Marion County,OR,1,8
+41049,Morrow County,OR,1,5
+41051,Multnomah County,OR,1,9
+41053,Polk County,OR,1,7
+41055,Sherman County,OR,1,5
+41057,Tillamook County,OR,1,5
+41059,Umatilla County,OR,1,5
+41061,Union County,OR,1,5
+41063,Wallowa County,OR,1,5
+41065,Wasco County,OR,1,5
+41067,Washington County,OR,1,9
+41069,Wheeler County,OR,1,5
+41071,Yamhill County,OR,1,8
