@@ -3,17 +3,20 @@ const mongoose = require('mongoose');
 
 const ichraClassSchema = new mongoose.Schema(
   {
-    group: { type: mongoose.Schema.Types.ObjectId, ref: 'Group', required: true }, // Employer link
-    name: { type: String, required: true },        // Class name (e.g. "Full-time TX Staff")
+    group: { type: mongoose.Schema.Types.ObjectId, ref: 'Group', required: true },
 
-    contribution_type: { 
-      type: String, 
-      enum: ['fixed', 'percentage'], 
-      required: true 
-    },
-    contribution_value: { type: Number, required: true }, // e.g. 300 (fixed $) or 70 (%)
-    
-    ideon_class_id: { type: String },              // ID returned from Ideon API
+    name: { type: String, required: true }, // e.g. "Full-time employees"
+    description: { type: String },
+
+    // Contribution rules
+    employee_contribution: { type: Number, required: true },   // monthly $ employer contributes for employee
+    dependent_contribution: { type: Number, required: true },  // monthly $ employer contributes for dependents
+
+    // Optional: sub-classes (like age bands)
+    subclass: { type: String }, // e.g. "Under 30", "30-50", "50+"
+
+    // Members assigned to this class
+    members: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Member' }]
   },
   { timestamps: true }
 );

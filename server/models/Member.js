@@ -1,30 +1,47 @@
 // server/models/Member.js
 const mongoose = require('mongoose');
 
+const dependentSchema = new mongoose.Schema({
+  first_name: String,
+  last_name: String,
+  dob: Date,
+  gender: String,
+  last_used_tobacco: Date,       // Ideon requires null or date
+  relationship: String,
+  same_household: Boolean
+});
+
 const memberSchema = new mongoose.Schema(
   {
+    // Relationships
     group: { type: mongoose.Schema.Types.ObjectId, ref: 'Group', required: true },
     ichra_class: { type: mongoose.Schema.Types.ObjectId, ref: 'ICHRAClass', required: true },
 
+    // Member basics
     first_name: { type: String, required: true },
     last_name: { type: String, required: true },
-    dob: { type: Date, required: true },          // Date of birth
-    tobacco_user: { type: Boolean, default: false },
+    date_of_birth: { type: Date, required: true },  // match Ideon
+    gender: { type: String, enum: ['M', 'F'] },
+    last_used_tobacco: { type: Date, default: null },
+    retiree: { type: Boolean, default: false },
+    cobra: { type: Boolean, default: false },
 
-    zip: { type: String, required: true },
-    state: { type: String, required: true },
+    // Address + location
+    zip_code: { type: String, required: true },
+    fips_code: { type: String },
+    location_id: { type: String },                  // match Ideon location ID
 
-    dependents: [
-      {
-        first_name: String,
-        last_name: String,
-        dob: Date,
-        tobacco_user: { type: Boolean, default: false },
-        relationship: { type: String }, // spouse, child, etc.
-      }
-    ],
+    // Household + affordability
+    household_income: { type: Number },
+    household_size: { type: Number },
+    safe_harbor_income: { type: Number },
+    annual_salary: { type: Number },
+    hours_per_week: { type: Number },
 
-    ideon_member_id: { type: String },            // ID returned from Ideon API
+    dependents: [dependentSchema],
+
+    // Ideon reference
+    ideon_member_id: { type: String }
   },
   { timestamps: true }
 );
