@@ -1,13 +1,21 @@
-// Group ICHRAClass
+// server/models/ICHRAClass.js
 const mongoose = require('mongoose');
 
-const ichraClassSchema = new mongoose.Schema({
-  groupId: { type: mongoose.Schema.Types.ObjectId, ref: 'Group', required: true },
-  name: { type: String, required: true }, // e.g., "Full-Time Employees"
-  subclass: String, // e.g., "Age 40-49"
-  employeeContribution: { type: Number, required: true },
-  dependentContribution: { type: Number, required: true },
-  createdAt: { type: Date, default: Date.now }
-});
+const ichraClassSchema = new mongoose.Schema(
+  {
+    group: { type: mongoose.Schema.Types.ObjectId, ref: 'Group', required: true }, // Employer link
+    name: { type: String, required: true },        // Class name (e.g. "Full-time TX Staff")
+
+    contribution_type: { 
+      type: String, 
+      enum: ['fixed', 'percentage'], 
+      required: true 
+    },
+    contribution_value: { type: Number, required: true }, // e.g. 300 (fixed $) or 70 (%)
+    
+    ideon_class_id: { type: String },              // ID returned from Ideon API
+  },
+  { timestamps: true }
+);
 
 module.exports = mongoose.model('ICHRAClass', ichraClassSchema);

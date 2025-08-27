@@ -1,86 +1,84 @@
+const fs = require('fs');
+const path = require('path');
+const csv = require('csv-parser');
+require('dotenv').config();
 
+const { connectDB, disconnectDB } = require('../server/config/db');
+const Plan = require('../server/models/plan.js');
 
-const mongoose = require("mongoose");
-const csv = require("csv-parser");
-const fs = require("fs");
-const dotenv = require("dotenv");
-const path = require("path");
-
-const Plan = require("../server/models/plan");
-
-// Load environment variables from project root .env
-dotenv.config({ path: path.resolve(__dirname, "../.env") });
-
-// Connect to MongoDB
 async function importPlans() {
-  try {
-    await mongoose.connect(process.env.MONGO_URI);
-    console.log("MongoDB connected – starting plans import");
+  await connectDB();
 
-    // Prepare to collect valid plan records
-    const results = [];
-    let loggedSample = false;
-
-    // Stream and parse the CSV file
-    fs.createReadStream(path.resolve(__dirname, "../data/plans.csv"))
-      .pipe(csv({
-        // Strip BOM and trim whitespace from each header
-        mapHeaders: ({ header }) => header.trim().replace(/^\uFEFF/, "")
-      }))
-      .on("data", (data) => {
-        // On first row only, log detected columns and sample data
-        if (!loggedSample) {
-          console.log("Detected columns:", Object.keys(data));
-          console.log("First row sample:", data);
-          loggedSample = true;
-        }
-
-        // Only import rows where CSV's `id` column is nonempty
-        if (data.id && data.id.trim() !== "") {
-          results.push({
-            plan_id:        data.id.trim(),              // CSV `id` → DB `plan_id`
-            carrier_name:   data.carrier_name?.trim()   || null,
-            display_name:   data.display_name?.trim()   || null,
-            effective_date: data.effective_date 
-                              ? new Date(data.effective_date) 
-                              : null,
-            expiration_date: data.expiration_date 
-                              ? new Date(data.expiration_date) 
-                              : null,
-            name:           data.name?.trim()           || null,
-            plan_type:      data.plan_type?.trim()      || null,
-            service_area_id:data.service_area_id?.trim()|| null,
-            source:         data.source?.trim()         || null,
-            type:           data.type?.trim()           || null,
-            plan_market:    data.plan_market?.trim()    || null,
-            on_market:      String(data.on_market).toLowerCase() === "true",
-            off_market:     String(data.off_market).toLowerCase() === "true",
-            metal_level:    data.metal_level?.trim()    || null,
-            issuer_id:      data.hios_issuer_id?.trim() || null,
-          });
-        }
-      })
-      .on("end", async () => {
-        // After parsing completes, insert into MongoDB
-        if (results.length === 0) {
-          console.warn("No valid plans found to import.");
-        } else {
-          await Plan.insertMany(results);
-          console.log(`Imported ${results.length} plans successfully.`);
-        }
-        await mongoose.disconnect();
-      })
-      .on("error", async (err) => {
-        // Handle file read errors
-        console.error("File read error:", err);
-        await mongoose.disconnect();
-      });
-
-  } catch (err) {
-    // Handle connection errors
-    console.error("MongoDB connection error:", err);
+  const filePath = path.join(__dirname, '..', 'data', 'plans.csv');
+  if (!fs.existsSync(filePath)) {
+    console.error(`CSV file not found at ${filePath}`);
+    await disconnectDB();
     process.exit(1);
   }
+
+  const plans = [];
+  fs.createReadStream(filePath)
+    .pipe(csv())
+    .on('data', (row) => {
+      if (row.id) {
+        plans.push({
+          ...row, // spreads all fields directly
+          id: row.id.trim(),
+          effective_date: row.effective_date ? new Date(row.effective_date) : null,
+          expiration_date: row.expiration_date ? new Date(row.expiration_date) : null,
+          updated_at: row.updated_at ? new Date(row.updated_at) : null,
+          _release_date: row._release_date ? new Date(row._release_date) : null,
+          on_market: row.on_market?.toLowerCase() === 'true',
+          off_market: row.off_market?.toLowerCase() === 'true',
+          hsa_eligible: row.hsa_eligible?.toLowerCase() === 'true',
+          adult_dental: row.adult_dental?.toLowerCase() === 'true',
+          age29_rider: row.age29_rider?.toLowerCase() === 'true',
+          actively_marketed: row.actively_marketed?.toLowerCase() === 'true',
+          standardized_plan: row.standardized_plan?.toLowerCase() === 'true',
+          _carrier_testing: row._carrier_testing?.toLowerCase() === 'true',
+          _embargo: row._embargo?.toLowerCase() === 'true',
+          actuarial_value: row.actuarial_value ? parseFloat(row.actuarial_value) : null,
+          essential_health_benefits_percentage: row.essential_health_benefits_percentage
+            ? parseFloat(row.essential_health_benefits_percentage)
+            : null,
+          premium: row.premium ? parseFloat(row.premium) : null,
+          premium_subsidized: row.premium_subsidized ? parseFloat(row.premium_subsidized) : null,
+          cms_quality_ratings_overall: row.cms_quality_ratings_overall
+            ? parseFloat(row.cms_quality_ratings_overall)
+            : null,
+          cms_quality_ratings_medical_care: row.cms_quality_ratings_medical_care
+            ? parseFloat(row.cms_quality_ratings_medical_care)
+            : null,
+          cms_quality_ratings_member_experience: row.cms_quality_ratings_member_experience
+            ? parseFloat(row.cms_quality_ratings_member_experience)
+            : null,
+          cms_quality_ratings_plan_administration: row.cms_quality_ratings_plan_administration
+            ? parseFloat(row.cms_quality_ratings_plan_administration)
+            : null
+        });
+      }
+    })
+    .on('end', async () => {
+      if (plans.length === 0) {
+        console.warn('No plans parsed from CSV.');
+        await disconnectDB();
+        return process.exit(1);
+      }
+
+      try {
+        await Plan.deleteMany({});
+        await Plan.insertMany(plans, { ordered: false });
+        console.log(`Imported ${plans.length} plans`);
+      } catch (err) {
+        console.error('Error inserting plans:', err);
+      } finally {
+        await disconnectDB();
+      }
+    })
+    .on('error', async (err) => {
+      console.error('Error reading CSV file:', err);
+      await disconnectDB();
+    });
 }
 
 importPlans();
