@@ -1,38 +1,55 @@
-const mongoose = require('mongoose');
 const fs = require('fs');
+const path = require('path');
 const csv = require('csv-parser');
 require('dotenv').config();
 
-const ServiceArea = require('../models/ServiceArea');
+const { connectDB, disconnectDB } = require('../server/config/db');
+const ServiceArea = require('../server/models/ServiceArea');
 
-mongoose.connect(process.env.MONGO_URI)
-  .then(() => importServiceAreas())
-  .catch(err => {
-    console.error('MongoDB connection error:', err);
+async function importServiceAreas() {
+  await connectDB();
+
+  const filePath = path.join(__dirname, '..', 'data', 'service_areas.csv');
+  if (!fs.existsSync(filePath)) {
+    console.error(`CSV file not found at ${filePath}`);
+    await disconnectDB();
     process.exit(1);
-  });
+  }
 
-function importServiceAreas() {
-  const results = [];
+  const serviceAreas = [];
 
-  fs.createReadStream('data/service_areas.csv')
+  fs.createReadStream(filePath)
     .pipe(csv())
-    .on('data', (data) => {
-      results.push({
-        serviceAreaId: data.service_area_id?.trim(),
-        issuerId: data.issuer_id?.trim(),
-        state: data.state_code?.trim()
-      });
+    .on('data', (row) => {
+      if (row.id && row.issuer_id && row.name) {
+        serviceAreas.push({
+          service_area_id: row.id.trim(), // from CSV "id"
+          issuer_id: row.issuer_id.trim(), // from CSV "issuer_id"
+          name: row.name.trim()           // from CSV "name"
+        });
+      }
     })
     .on('end', async () => {
+      if (serviceAreas.length === 0) {
+        console.warn('No service areas parsed from CSV.');
+        await disconnectDB();
+        return process.exit(1);
+      }
+
       try {
         await ServiceArea.deleteMany({});
-        await ServiceArea.insertMany(results);
-        console.log(`Imported ${results.length} service areas`);
-        mongoose.disconnect();
+        await ServiceArea.insertMany(serviceAreas, { ordered: false });
+        console.log(`Imported ${serviceAreas.length} service areas`);
       } catch (err) {
         console.error('Error inserting service areas:', err);
-        mongoose.disconnect();
+      } finally {
+        await disconnectDB();
       }
+    })
+    .on('error', async (err) => {
+      console.error('Error reading CSV file:', err);
+      await disconnectDB();
     });
 }
+
+importServiceAreas();
