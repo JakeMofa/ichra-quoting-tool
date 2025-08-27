@@ -1,4 +1,4 @@
-require("dotenv").config();
+require('dotenv').config({ path: '../.env' }); // adjust path relative to server/
 console.log("MONGO_URI from .env:", process.env.MONGO_URI);
 const express = require("express");
 const mongoose = require("mongoose");
