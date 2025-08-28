@@ -1,12 +1,12 @@
 // server/models/Member.js
-const mongoose = require('mongoose');
+const mongoose = require("mongoose");
 
 const dependentSchema = new mongoose.Schema({
   first_name: String,
   last_name: String,
   dob: Date,
   gender: String,
-  last_used_tobacco: Date,       // Ideon requires null or date
+  last_used_tobacco: Date, // Ideon requires null or date
   relationship: String,
   same_household: Boolean
 });
@@ -14,14 +14,14 @@ const dependentSchema = new mongoose.Schema({
 const memberSchema = new mongoose.Schema(
   {
     // Relationships
-    group: { type: mongoose.Schema.Types.ObjectId, ref: 'Group', required: true },
-    ichra_class: { type: mongoose.Schema.Types.ObjectId, ref: 'ICHRAClass', required: true },
+    group: { type: mongoose.Schema.Types.ObjectId, ref: "Group", required: true },
+    ichra_class: { type: mongoose.Schema.Types.ObjectId, ref: "ICHRAClass", required: false }, // optional for now
 
     // Member basics
     first_name: { type: String, required: true },
     last_name: { type: String, required: true },
-    date_of_birth: { type: Date, required: true },  // match Ideon
-    gender: { type: String, enum: ['M', 'F'] },
+    date_of_birth: { type: Date, required: false }, // was required, relaxed so you can onboard
+    gender: { type: String, enum: ["M", "F", "U"], default: "U" },
     last_used_tobacco: { type: Date, default: null },
     retiree: { type: Boolean, default: false },
     cobra: { type: Boolean, default: false },
@@ -29,7 +29,7 @@ const memberSchema = new mongoose.Schema(
     // Address + location
     zip_code: { type: String, required: true },
     fips_code: { type: String },
-    location_id: { type: String },                  // match Ideon location ID
+    location_id: { type: String }, // match Ideon location ID
 
     // Household + affordability
     household_income: { type: Number },
@@ -46,4 +46,4 @@ const memberSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-module.exports = mongoose.model('Member', memberSchema);
+module.exports = mongoose.model("Member", memberSchema);

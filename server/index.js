@@ -1,18 +1,37 @@
-require('dotenv').config({ path: '../.env' }); // adjust path relative to server/
-console.log("MONGO_URI from .env:", process.env.MONGO_URI);
+// server/index.js
+require("dotenv").config({ path: "../.env" }); 
 const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
+
+const groupRoutes = require("./routes/groups"); // Groups routes
 
 const app = express();
 app.use(express.json());
 app.use(cors());
 
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 5050;
+const MONGO_URI = process.env.MONGO_URI;
 
-mongoose.connect(process.env.MONGO_URI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-})
-  .then(() => app.listen(PORT, () => console.log(`Server running on port ${PORT}`)))
-  .catch(err => console.error("MongoDB connection error:", err));
+// Mount routes
+app.use("/api/groups", groupRoutes);
+
+//  smoke test route here
+app.get("/ping", (req, res) => {
+  console.log(">>> /ping called");
+  res.json({ message: "pong" });
+});
+
+// Connect to MongoDB
+mongoose
+  .connect(MONGO_URI)
+  .then(() => {
+    console.log("MongoDB connected:", MONGO_URI);
+    app.listen(PORT, () => {
+      console.log(`Server running on port ${PORT}`);
+    });
+  })
+  .catch((err) => {
+    console.error("MongoDB connection error:", err.message);
+    process.exit(1); // exit process if DB connection fails
+  });
