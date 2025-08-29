@@ -40,7 +40,7 @@ const planSchema = new mongoose.Schema(
     hospice_service: String,
     hsa_eligible: Boolean,
 
-    id: { type: String, required: true, unique: true }, // plan_id
+    plan_id: { type: String, required: true, unique: true }, // plan_id
     imaging: String,
 
     individual_drug_deductible: String,
