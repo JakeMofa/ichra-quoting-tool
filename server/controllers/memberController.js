@@ -25,18 +25,44 @@ exports.createMember = async (req, res) => {
     // Step 2: Try Ideon API
     try {
       console.log(">>> Calling Ideon API addMember...");
-      const ideonRes = await ideon.addMember(group.ideon_group_id, {
-        first_name: payload.first_name,
-        last_name: payload.last_name,
-        dob: payload.dob, // must be YYYY-MM-DD
-        gender: payload.gender || "U",
-        zip_code: payload.zip_code,
-        external_id: payload.external_id || `ext-${Date.now()}`
-      });
 
-      ideonMemberId = ideonRes.data.member.id;
-      ideonData = ideonRes.data;
-      console.log(">>> Ideon member created:", ideonMemberId);
+      // Safely grab the group's first location id
+      const locationId =
+        group.locations && group.locations.length > 0
+          ? group.locations[0].ideon_location_id // persisted value
+          : "default-loc-id";
+
+      // Build payload with required fields Ideon expects
+      const ideonPayload = {
+        members: [
+          {
+            first_name: payload.first_name,
+            last_name: payload.last_name,
+            date_of_birth: payload.dob || "1990-01-01", // Ideon expects "date_of_birth"
+            gender: payload.gender || "U",
+            zip_code: payload.zip_code,
+            fips_code: payload.fips_code || "36081",
+            location_id: locationId,
+            cobra: false,
+            retiree: false,
+            last_used_tobacco: null,
+            dependents: payload.dependents || [],
+            external_id: payload.external_id || `ext-${Date.now()}`
+          }
+        ]
+      };
+
+      const ideonRes = await ideon.addMember(group.ideon_group_id, ideonPayload);
+
+      //  Fix: Ideon returns { members: [ { ... } ] }
+      if (ideonRes.data.members && ideonRes.data.members.length > 0) {
+        ideonMemberId = ideonRes.data.members[0].id;
+        ideonData = ideonRes.data.members[0];
+        console.log(">>> Ideon member created:", ideonMemberId);
+      } else {
+        console.warn(">>> Unexpected Ideon response:", ideonRes.data);
+        ideonMemberId = `mock-${uuidv4()}`;
+      }
     } catch (err) {
       console.warn(">>> Ideon addMember failed, falling back");
       console.warn("    Status:", err.response?.status);
@@ -48,24 +74,36 @@ exports.createMember = async (req, res) => {
     // Step 3: Always save to Mongo
     console.log(">>> Saving member to Mongo...");
     const memberDoc = new Member({
-        group: groupId,
-        first_name: payload.first_name,
-        last_name: payload.last_name,
-        date_of_birth: payload.dob ? new Date(payload.dob) : null, // map dob → date_of_birth
-        gender: payload.gender || "U",
-        zip_code: payload.zip_code,
-        ichra_class: payload.class || null, // renamed to match schema, optional
-        ideon_member_id: ideonMemberId,
-        dependents: payload.dependents || []
-      });
+      group: groupId,
+      first_name: payload.first_name,
+      last_name: payload.last_name,
+      date_of_birth: payload.dob ? new Date(payload.dob) : new Date("1990-01-01"),
+      gender: payload.gender || "U",
+      zip_code: payload.zip_code,
+      ichra_class: payload.class || null,
+      ideon_member_id: ideonMemberId,
+      dependents: payload.dependents || []
+    });
 
     await memberDoc.save();
     console.log(">>> Member saved in MongoDB:", memberDoc._id);
 
     return res.status(201).json({
       message: "Member created successfully",
-      member: memberDoc,
-      ideon: ideonData // will be null if fallback
+      member: {
+        _id: memberDoc._id,
+        first_name: memberDoc.first_name,
+        last_name: memberDoc.last_name,
+        dob: memberDoc.date_of_birth, // expose as dob
+        gender: memberDoc.gender,
+        zip_code: memberDoc.zip_code,
+        ichra_class: memberDoc.ichra_class,
+        ideon_member_id: memberDoc.ideon_member_id,
+        dependents: memberDoc.dependents,
+        createdAt: memberDoc.createdAt,
+        updatedAt: memberDoc.updatedAt
+      },
+      ideon: ideonData // will be the Ideon member object if success
     });
   } catch (err) {
     console.error(">>> Error creating member (outer catch):", err);
@@ -77,9 +115,24 @@ exports.createMember = async (req, res) => {
 exports.getMembersByGroup = async (req, res) => {
   try {
     console.log(">>> Fetching members for group:", req.params.groupId);
-    const members = await Member.find({ group: req.params.groupId }).populate("class");
+    const members = await Member.find({ group: req.params.groupId }).populate("ichra_class");
     console.log(">>> Found members count:", members.length);
-    res.json(members);
+
+    res.json(
+      members.map(m => ({
+        _id: m._id,
+        first_name: m.first_name,
+        last_name: m.last_name,
+        dob: m.date_of_birth,
+        gender: m.gender,
+        zip_code: m.zip_code,
+        ichra_class: m.ichra_class,
+        ideon_member_id: m.ideon_member_id,
+        dependents: m.dependents,
+        createdAt: m.createdAt,
+        updatedAt: m.updatedAt
+      }))
+    );
   } catch (err) {
     console.error(">>> Error fetching members:", err);
     res.status(500).json({ error: "Failed to fetch members" });

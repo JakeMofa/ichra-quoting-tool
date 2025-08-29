@@ -9,6 +9,7 @@ exports.createGroup = async (req, res) => {
 
   let ideonGroupId;
   let ideonData = null;
+  let locations = [];
 
   // Step 1: Try Ideon
   try {
@@ -38,11 +39,33 @@ exports.createGroup = async (req, res) => {
     ideonData = ideonRes.data;
     console.log(">>> Ideon group created:", ideonGroupId);
 
+    // Map Ideon’s locations into our Mongo format
+    locations = ideonRes.data.locations.map(loc => ({
+      external_id: loc.external_id,
+      fips_code: loc.fips_code,
+      name: loc.name,
+      number_of_employees: loc.number_of_employees,
+      primary: loc.primary,
+      zip_code: loc.zip_code,
+      ideon_location_id: loc.id   //  persist Ideon’s location ID
+    }));
+
   } catch (err) {
-    // Explicitly log details of the failure
     console.warn(">>> Ideon createGroup failed:", err.response?.status, err.response?.data || err.message);
-    // Always assign a mock ID
+
     ideonGroupId = `mock-${uuidv4()}`;
+    // fallback: still save a default location in Mongo
+    locations = [
+      {
+        external_id: `loc-${Date.now()}`,
+        fips_code: payload.fips_code || "36081",
+        name: payload.location_name || "Headquarters",
+        number_of_employees: payload.number_of_employees || 1,
+        primary: true,
+        zip_code: payload.zip_code || "11423",
+        ideon_location_id: `mock-${uuidv4()}`,
+      },
+    ];
   }
 
   // Step 2: Always save to Mongo
@@ -53,6 +76,7 @@ exports.createGroup = async (req, res) => {
       contact_email: payload.contact_email,
       contact_phone: payload.contact_phone,
       ideon_group_id: ideonGroupId,
+      locations: locations,   // store them in Mongo
       classes: [],
     });
 
@@ -62,7 +86,7 @@ exports.createGroup = async (req, res) => {
     return res.status(201).json({
       message: "Group created successfully",
       group: groupDoc,
-      ideon: ideonData, // will be null if fallback
+      ideon: ideonData, // may be null if fallback
     });
   } catch (dbErr) {
     console.error(">>> Error saving group in Mongo:", dbErr.message);
