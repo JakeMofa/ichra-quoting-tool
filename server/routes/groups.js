@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const groupController = require("../controllers/groupController");
 
+
 // POST /api/groups - create group
 router.post("/", groupController.createGroup);
 

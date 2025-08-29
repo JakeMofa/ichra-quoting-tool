@@ -1,6 +1,7 @@
 // server/controllers/memberController.js
 const Member = require("../models/Member");
 const Group = require("../models/Group");
+const ICHRAClass = require("../models/ICHRAClass");
 const ideon = require("../services/ideon");
 const { v4: uuidv4 } = require("uuid");
 
@@ -25,20 +26,17 @@ exports.createMember = async (req, res) => {
     // Step 2: Try Ideon API
     try {
       console.log(">>> Calling Ideon API addMember...");
-
-      // Safely grab the group's first location id
       const locationId =
         group.locations && group.locations.length > 0
-          ? group.locations[0].ideon_location_id // persisted value
+          ? group.locations[0].ideon_location_id
           : "default-loc-id";
 
-      // Build payload with required fields Ideon expects
       const ideonPayload = {
         members: [
           {
             first_name: payload.first_name,
             last_name: payload.last_name,
-            date_of_birth: payload.dob || "1990-01-01", // Ideon expects "date_of_birth"
+            date_of_birth: payload.dob || "1990-01-01",
             gender: payload.gender || "U",
             zip_code: payload.zip_code,
             fips_code: payload.fips_code || "36081",
@@ -54,7 +52,6 @@ exports.createMember = async (req, res) => {
 
       const ideonRes = await ideon.addMember(group.ideon_group_id, ideonPayload);
 
-      //  Fix: Ideon returns { members: [ { ... } ] }
       if (ideonRes.data.members && ideonRes.data.members.length > 0) {
         ideonMemberId = ideonRes.data.members[0].id;
         ideonData = ideonRes.data.members[0];
@@ -71,7 +68,7 @@ exports.createMember = async (req, res) => {
       ideonMemberId = `mock-${uuidv4()}`;
     }
 
-    // Step 3: Always save to Mongo
+    // Step 3: Save to Mongo
     console.log(">>> Saving member to Mongo...");
     const memberDoc = new Member({
       group: groupId,
@@ -80,7 +77,7 @@ exports.createMember = async (req, res) => {
       date_of_birth: payload.dob ? new Date(payload.dob) : new Date("1990-01-01"),
       gender: payload.gender || "U",
       zip_code: payload.zip_code,
-      ichra_class: payload.class || null,
+      ichra_class: payload.ichra_class || null,   // renamed field for clarity
       ideon_member_id: ideonMemberId,
       dependents: payload.dependents || []
     });
@@ -88,13 +85,29 @@ exports.createMember = async (req, res) => {
     await memberDoc.save();
     console.log(">>> Member saved in MongoDB:", memberDoc._id);
 
+    // Step 4: If class provided, link the member to the class
+    if (payload.ichra_class) {
+      try {
+        const ichraClass = await ICHRAClass.findById(payload.ichra_class);
+        if (ichraClass) {
+          ichraClass.members.push(memberDoc._id);
+          await ichraClass.save();
+          console.log(">>> Linked member to class:", ichraClass._id);
+        } else {
+          console.warn(">>> Provided ichra_class not found:", payload.ichra_class);
+        }
+      } catch (err) {
+        console.error(">>> Error linking member to class:", err.message);
+      }
+    }
+
     return res.status(201).json({
       message: "Member created successfully",
       member: {
         _id: memberDoc._id,
         first_name: memberDoc.first_name,
         last_name: memberDoc.last_name,
-        dob: memberDoc.date_of_birth, // expose as dob
+        dob: memberDoc.date_of_birth,
         gender: memberDoc.gender,
         zip_code: memberDoc.zip_code,
         ichra_class: memberDoc.ichra_class,
@@ -103,7 +116,7 @@ exports.createMember = async (req, res) => {
         createdAt: memberDoc.createdAt,
         updatedAt: memberDoc.updatedAt
       },
-      ideon: ideonData // will be the Ideon member object if success
+      ideon: ideonData
     });
   } catch (err) {
     console.error(">>> Error creating member (outer catch):", err);

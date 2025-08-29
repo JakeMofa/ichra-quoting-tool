@@ -4,10 +4,17 @@ const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
 
-const groupRoutes = require("./routes/groups"); // Groups routes
+// Routes
+const groupRoutes = require("./routes/groups"); 
+const classRoutes = require("./routes/classes"); 
+const memberRoutes = require("./routes/members");   // NEW
+const ichraRoutes = require("./routes/ichra"); 
+const quoteRoutes = require("./routes/quote");     // NEW
 
-// models that need to be registered are required
-require("./models/ICHRAClass");   // 
+// Register models that need to be loaded on startup
+require("./models/ICHRAClass");
+require("./models/Member");
+require("./models/AfforadabilityResult");
 
 const app = express();
 app.use(express.json());
@@ -17,15 +24,19 @@ const PORT = process.env.PORT || 5050;
 const MONGO_URI = process.env.MONGO_URI;
 
 // Mount routes
-app.use("/api/groups", groupRoutes);
+app.use("/api/groups", groupRoutes);   // e.g. /api/groups/:id
+app.use("/api/groups", classRoutes);   // e.g. /api/groups/:id/classes
+app.use("/api/groups", memberRoutes);  // e.g. /api/groups/:id/members
+app.use("/api", ichraRoutes);          // e.g. /api/groups/:id/members/:id/ichra
+app.use("/api", quoteRoutes);          // e.g. /api/groups/:id/quotes
 
-//  smoke test route here
+// Smoke test
 app.get("/ping", (req, res) => {
   console.log(">>> /ping called");
   res.json({ message: "pong" });
 });
 
-// Connect to MongoDB
+// Connect DB + start server
 mongoose
   .connect(MONGO_URI)
   .then(() => {
@@ -36,5 +47,5 @@ mongoose
   })
   .catch((err) => {
     console.error("MongoDB connection error:", err.message);
-    process.exit(1); // exit process if DB connection fails
+    process.exit(1);
   });
