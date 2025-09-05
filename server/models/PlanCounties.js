@@ -1,3 +1,5 @@
+//server/models/PlanCounties.js
+
 const mongoose = require('mongoose');
 
 const planCountySchema = new mongoose.Schema(
@@ -10,5 +12,8 @@ const planCountySchema = new mongoose.Schema(
 
 // unique composite index to avoid duplicates
 planCountySchema.index({ plan_id: 1, county_id: 1 }, { unique: true });
+
+// Fast county -> plans
+planCountySchema.index({ county_id: 1 });
 
 module.exports = mongoose.model('PlanCounty', planCountySchema);

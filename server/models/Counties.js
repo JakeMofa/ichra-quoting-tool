@@ -1,3 +1,4 @@
+//server/models/Counties.js
 const mongoose = require('mongoose');
 
 const countySchema = new mongoose.Schema(
@@ -11,4 +12,10 @@ const countySchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+
+// Helpful for UI/searches for quoetes
+countySchema.index({ state_id: 1, name: 1 });
+
 module.exports = mongoose.model('County', countySchema);
+
+

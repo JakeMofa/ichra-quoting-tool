@@ -1,3 +1,4 @@
+//server/models/Plan.js
 const mongoose = require('mongoose');
 
 const planSchema = new mongoose.Schema(
@@ -135,5 +136,15 @@ const planSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+// Fast metadata filters for the comparison UI
+planSchema.index({ carrier_name: 1 });
+planSchema.index({ level: 1 });
+planSchema.index({ on_market: 1 });
+planSchema.index({ off_market: 1 });
+
+// filter by multiple at once:
+planSchema.index({ carrier_name: 1, level: 1, on_market: 1 });
+
 
 module.exports = mongoose.model('Plan', planSchema);
