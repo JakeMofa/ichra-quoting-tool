@@ -30,7 +30,7 @@ const memberSchema = new mongoose.Schema(
     old_employee_contribution: { type: Number, default: 0 },
 
     // Address + location (Ideon addMember requires fips_code + location_id)
-    zip_code: { type: String, required: true },
+    zip_code: {type: String,set: v => (v == null ? v : String(v).padStart(5, "0")), },
     fips_code: { type: String },
     location_id: { type: String }, // Ideon location ID
 

@@ -226,13 +226,19 @@ exports.updateMember = async (req, res) => {
       ichra_class,                   // ObjectId of ICHRAClass
       old_employer_contribution,     // Number
       old_employee_contribution,     // Number
-      // optional extras if ,update them here:
+
+      // optional
       household_income,
       safe_harbor_income,
       household_size,
+      zip_code,
+      fips_code,
+      location_id,
+      gender,
+      date_of_birth,
     } = req.body || {};
 
-    // Reassign ICHRA class if provided (validate class belongs to this group)
+    // (1) Reassign class if provided (and belongs to this group)
     if (ichra_class) {
       if (!mongoose.Types.ObjectId.isValid(ichra_class)) {
         return res.status(400).json({ error: "Invalid ichra_class id" });
@@ -244,7 +250,7 @@ exports.updateMember = async (req, res) => {
       member.ichra_class = ichra_class;
     }
 
-    // Prior plan contributions (for comparison report)
+    // (2) Prior plan contributions
     if (old_employer_contribution != null) {
       member.old_employer_contribution = Number(old_employer_contribution);
     }
@@ -252,16 +258,34 @@ exports.updateMember = async (req, res) => {
       member.old_employee_contribution = Number(old_employee_contribution);
     }
 
-    // Optional updates
+    // (3) Optional income / household updates
     if (household_income != null) member.household_income = Number(household_income);
     if (safe_harbor_income != null) member.safe_harbor_income = Number(safe_harbor_income);
     if (household_size != null) member.household_size = Number(household_size);
 
-    await member.save();
+    // (4) Location & demographic updates
+    if (zip_code != null) {
+      // accept number or string; store as 5-digit string
+      const z = String(zip_code).trim();
+      const z5 = z.padStart(5, "0").slice(0, 5);
+      if (!/^\d{5}$/.test(z5)) {
+        return res.status(400).json({ error: "zip_code must be 5 digits" });
+      }
+      member.zip_code = z5;
+    }
+    if (fips_code != null) member.fips_code = String(fips_code).trim();
+    if (location_id != null) member.location_id = String(location_id).trim();
+    if (gender != null) member.gender = String(gender).trim();
+    if (date_of_birth != null) {
+      const d = new Date(date_of_birth);
+      if (isNaN(d)) return res.status(400).json({ error: "Invalid date_of_birth" });
+      member.date_of_birth = d;
+    }
 
+    await member.save();
     return res.json({ message: "Member updated successfully", member });
   } catch (err) {
     console.error(">>> Error updating member:", err);
-    return res.status(500).json({ error: "Failed to update member" });
+    return res.status(500).json({ error: "Failed to update member", details: err.message });
   }
 };

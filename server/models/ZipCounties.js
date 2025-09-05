@@ -1,4 +1,4 @@
-// server/models/ZipCounty.js
+// server/models/ZipCounties.js
 const mongoose = require("mongoose");
 
 const zipCountySchema = new mongoose.Schema(
