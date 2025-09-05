@@ -3,21 +3,14 @@ const express = require("express");
 const router = express.Router();
 const ichraController = require("../controllers/ichraController");
 
-
-// POST /api/groups/:groupId/members/:memberId/ichra
 // Calculate affordability and save result
 router.post("/groups/:groupId/members/:memberId/ichra", ichraController.calculateICHRA);
 
-// GET /api/groups/:groupId/members/:memberId/ichra
-// Fetch saved affordability results for a member
+// Latest (two aliases: with and without `/latest`)
+router.get("/groups/:groupId/members/:memberId/ichra/latest", ichraController.getLatestICHRA);
 router.get("/groups/:groupId/members/:memberId/ichra", ichraController.getLatestICHRA);
 
-
-
-// GET full history
-
+// Full history
 router.get("/groups/:groupId/members/:memberId/ichra/history", ichraController.getICHRAHistory);
 
-
 module.exports = router;
-

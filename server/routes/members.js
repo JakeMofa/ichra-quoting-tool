@@ -9,4 +9,7 @@ router.post("/", memberController.createMember);
 // GET /api/groups/:groupId/members → list members
 router.get("/", memberController.getMembersByGroup);
 
+// PATCH /api/groups/:groupId/members/:memberId → update class & old contributions
+router.patch("/:memberId", memberController.updateMember);
+
 module.exports = router;

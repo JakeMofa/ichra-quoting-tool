@@ -26,7 +26,7 @@ const MONGO_URI = process.env.MONGO_URI;
 // Mount routes
 app.use("/api/groups", groupRoutes);   // e.g. /api/groups/:id
 app.use("/api/groups", classRoutes);   // e.g. /api/groups/:id/classes
-app.use("/api/groups", memberRoutes);  // e.g. /api/groups/:id/members
+app.use("/api/groups/:groupId/members", memberRoutes);  // /api/groups/:groupId/members
 app.use("/api", ichraRoutes);          // e.g. /api/groups/:id/members/:id/ichra
 app.use("/api", quoteRoutes);          // e.g. /api/groups/:id/quotes
 

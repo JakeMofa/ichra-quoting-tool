@@ -1,71 +1,125 @@
 // server/services/ideon.js
+
+// Notes:
+// - BASE_URL: https://api.ideonapi.com   (no trailing /v6 in the URL)
+// - ICHRA create is NESTED: POST /groups/{groupId}/ichra_affordability_calculations
+// - addMember: POST /groups/{groupId}/members
+// - Lightweight retry + throttle to respect ~100 rpm limit
+
 require("dotenv").config();
 const axios = require("axios");
 
-const IDEON_API_KEY = process.env.IDEON_API_KEY;
-const IDEON_BASE_URL = "https://api.ideonapi.com";
+// --- Config ---
+const IDEON_API_KEY = process.env.IDEON_API_KEY || process.env.VERICRED_API_KEY || "";
+const IDEON_BASE_URL = process.env.IDEON_BASE_URL || "https://api.ideonapi.com";
 
-// Axios instance
+// Throttle: minimum delay between requests (ms). 700ms ≈ 85 req/min, safe under shared 100 rpm.
+const MIN_DELAY_MS = Number(process.env.IDEON_MIN_DELAY_MS || 700);
+
+// Retry/backoff for 429/5xx
+const MAX_RETRIES = Number(process.env.IDEON_MAX_RETRIES || 3);
+const INITIAL_BACKOFF_MS = Number(process.env.IDEON_INITIAL_BACKOFF_MS || 500);
+
+// --- Axios instance ---
 const api = axios.create({
   baseURL: IDEON_BASE_URL,
   headers: {
+    // Ideon historically accepted "Vericred-Api-Key". Some envs allow "Ideon-Api-Key".
+    // Sending both is harmless; server will ignore extras.
     "Vericred-Api-Key": IDEON_API_KEY,
+    "Ideon-Api-Key": IDEON_API_KEY,
+    "Authorization": `Bearer ${IDEON_API_KEY}`,
     "Content-Type": "application/json",
+    "Accept": "application/json",
+    // Pin version so changes to default don’t surprise us.
+    "Accept-Version": "v6",
   },
   timeout: 15000,
 });
 
-// Retry wrapper for rate limiting
-async function requestWithRetry(fn, retries = 3, delay = 1000) {
+// --- Simple throttle (one request every MIN_DELAY_MS) ---
+let lastRequestAt = 0;
+async function throttle() {
+  const now = Date.now();
+  const wait = Math.max(0, lastRequestAt + MIN_DELAY_MS - now);
+  if (wait > 0) {
+    await new Promise((r) => setTimeout(r, wait));
+  }
+  lastRequestAt = Date.now();
+}
+
+// --- Retry wrapper ---
+async function requestWithRetry(fn, retries = MAX_RETRIES, backoff = INITIAL_BACKOFF_MS) {
   try {
     return await fn();
   } catch (err) {
     const status = err.response?.status;
-    if (status === 429 && retries > 0) {
-      console.warn(`Rate limited. Retrying in ${delay}ms...`);
-      await new Promise((res) => setTimeout(res, delay));
-      return requestWithRetry(fn, retries - 1, delay * 2);
+    const retriable = status === 429 || (status >= 500 && status <= 599);
+    if (retriable && retries > 0) {
+      console.warn(`[Ideon] HTTP ${status}. Retrying in ${backoff}ms...`);
+      await new Promise((r) => setTimeout(r, backoff));
+      return requestWithRetry(fn, retries - 1, Math.min(backoff * 2, 8000));
     }
-    console.error("Ideon API error:", err.response?.data || err.message);
+    console.error("[Ideon] request failed:", {
+      status,
+      data: err.response?.data,
+      message: err.message,
+    });
     throw err;
   }
 }
 
-// === Service Methods with logs ===
+// --- Low-level HTTP helpers with throttle+retry ---
+async function POST(path, data) {
+  await throttle();
+  console.log(`[Ideon] POST ${path}`);
+  return requestWithRetry(() => api.post(path, data));
+}
 
-// 1. Create a Group
+async function GET(path, params) {
+  await throttle();
+  console.log(`[Ideon] GET ${path}`);
+  return requestWithRetry(() => api.get(path, { params }));
+}
+
+// --- Public API ---
+// 1) Create Group
 async function createGroup(groupData) {
-  console.log("Ideon API: Creating group with payload:", groupData);
-  const res = await requestWithRetry(() => api.post("/groups", groupData));
-  console.log("Ideon API: Group created successfully:", res.data);
-  return res;
+  return POST("/groups", groupData);
 }
 
-// 2. Add Members to a Group
+// 2) Add Member
 async function addMember(groupId, memberData) {
-  console.log(`Ideon API: Adding member to group ${groupId} with payload:`, memberData);
-  const res = await requestWithRetry(() =>
-    api.post(`/groups/${groupId}/members`, memberData)
-  );
-  console.log("Ideon API: Member added successfully:", res.data);
-  return res;
+  if (!groupId) throw new Error("addMember requires groupId");
+  return POST(`/groups/${encodeURIComponent(groupId)}/members`, memberData);
 }
 
-// 3. Calculate ICHRA Affordability
-async function calculateICHRA(groupId, affordabilityData) {
-  console.log(
-    `Ideon API: Calculating ICHRA affordability for group ${groupId} with payload:`,
-    affordabilityData
-  );
-  const res = await requestWithRetry(() =>
-    api.post(`/groups/${groupId}/ichra_affordability`, affordabilityData)
-  );
-  console.log("Ideon API: ICHRA affordability calculation response:", res.data);
-  return res;
+// 3) ICHRA affordability (NESTED under /groups/{id})
+async function startICHRA(groupId, payload) {
+  if (!groupId) throw new Error("startICHRA requires groupId");
+  // payload:
+  // { ichra_affordability_calculation: { effective_date, plan_year?, rating_area_location } }
+  return POST(`/groups/${encodeURIComponent(groupId)}/ichra_affordability_calculations`, payload);
+}
+
+// 4) Poll ICHRA calc status
+async function getICHRA(calcId) {
+  if (!calcId) throw new Error("getICHRA requires calcId");
+  return GET(`/ichra_affordability_calculations/${encodeURIComponent(calcId)}`);
+}
+
+// 5) Fetch member-level ICHRA details
+async function getICHRAForMembers(calcId) {
+  if (!calcId) throw new Error("getICHRAForMembers requires calcId");
+  return GET(`/ichra_affordability_calculations/${encodeURIComponent(calcId)}/members`);
 }
 
 module.exports = {
   createGroup,
   addMember,
-  calculateICHRA,
+  startICHRA,
+  getICHRA,
+  getICHRAForMembers,
+  POST,
+  GET,
 };
