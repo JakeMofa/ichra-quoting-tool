@@ -1,5 +1,8 @@
 {
   "dependencies": {
     "uuid": "^11.1.0"
+  },
+  "scripts": {
+    "setup": "bash ./setup.sh"
   }
 }
