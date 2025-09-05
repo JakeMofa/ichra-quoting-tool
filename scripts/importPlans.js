@@ -23,7 +23,7 @@ async function importPlans() {
       if (row.id) {
         plans.push({
           ...row, // spreads all fields directly
-          id: row.id.trim(),
+          plan_id: row.id.trim(),
           effective_date: row.effective_date ? new Date(row.effective_date) : null,
           expiration_date: row.expiration_date ? new Date(row.expiration_date) : null,
           updated_at: row.updated_at ? new Date(row.updated_at) : null,

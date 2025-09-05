@@ -124,6 +124,88 @@ function transformQuoteDoc(doc) {
   };
 }
 
+
+
+// --- On-market SLCSP (Benchmark) helper -------------------------------------
+// Returns the 2nd-lowest premium silver plan for (countyId, age, tobacco).
+// If only one priced silver plan exists, we fall back to the lowest (rank=1).
+async function computeBenchmarkSilver({ countyId, age, tobacco }) {
+  const county_id = String(countyId);
+
+  // 1) All plans in county
+  const planCountyRows = await PlanCounty.find({ county_id })
+    .select({ plan_id: 1, _id: 0 })
+    .lean();
+  const planIds = Array.from(new Set(planCountyRows.map(r => r.plan_id)));
+  if (!planIds.length) {
+    return { error: `No plans in county_id ${county_id}` };
+  }
+
+  // 2) On-market Silver plans
+  const silverPlans = await Plan.find({
+    plan_id: { $in: planIds },
+    on_market: true,
+    level: /silver/i, // tolerate "Silver" / "silver"
+  })
+    .select({
+      plan_id: 1,
+      carrier_name: 1,
+      display_name: 1,
+      name: 1,
+      plan_type: 1,
+      level: 1,
+    })
+    .lean();
+
+  if (!silverPlans.length) {
+    return { error: `No on-market Silver plans in county_id ${county_id}` };
+  }
+
+  // 3) Pricing for this age+tobacco across those silver plans
+  const silverIds = silverPlans.map(p => p.plan_id);
+  const pricingRows = await Pricing.find({
+    plan_id: { $in: silverIds },
+    age,
+    tobacco: !!tobacco,
+  })
+    .select({ plan_id: 1, premium: 1, _id: 0 })
+    .lean();
+
+  if (!pricingRows.length) {
+    return { error: `No pricing for Silver plans at age ${age} (tobacco=${!!tobacco})` };
+  }
+
+  const premByPlan = new Map(pricingRows.map(p => [p.plan_id, Number(p.premium)]));
+
+  // 4) Merge plan meta + premium, filter out missing premiums, rank ascending
+  const ranked = silverPlans
+    .map(p => ({
+      plan_id: p.plan_id,
+      premium: premByPlan.get(p.plan_id),
+      carrier_name: p.carrier_name,
+      display_name: p.display_name || p.name || null,
+      plan_type: p.plan_type,
+      level: p.level,
+    }))
+    .filter(x => Number.isFinite(x.premium))
+    .sort((a, b) => a.premium - b.premium);
+
+  if (!ranked.length) {
+    return { error: `No priced Silver plans after filtering (age ${age}, tobacco=${!!tobacco})` };
+  }
+
+  // 5) Pick SLCSP: index 1 if available, else index 0 fallback
+  const idx = ranked.length >= 2 ? 1 : 0;
+  const chosen = ranked[idx];
+
+  return {
+    benchmark_plan_id: chosen.plan_id,
+    benchmark_premium: chosen.premium,
+    slcsp_rank: idx + 1, // 2 when we truly have 2+, else 1 fallback
+    silver_candidates: ranked, // full ranked list for transparency/debug
+  };
+}
+
 // -----------Generate Quotes----- controllers ----------------
 
 // POST /api/groups/:groupId/quotes
@@ -523,5 +605,71 @@ exports.previewMemberQuotes = async (req, res) => {
   } catch (err) {
     console.error(">>> Error in previewMemberQuotes:", err);
     return res.status(500).json({ error: "Failed to preview quotes" });
+  }
+};
+
+
+// POST /api/groups/:groupId/quotes/benchmark
+// Body: { member_id, county_id, effective_date?, tobacco? }
+// → Computes SLCSP (benchmark) for that member in that county (no DB writes).
+exports.benchmarkForMember = async (req, res) => {
+  try {
+    const { groupId } = req.params;
+    const { member_id, county_id, effective_date, tobacco } = req.body || {};
+
+    if (!member_id || !county_id) {
+      return res.status(400).json({ error: "member_id and county_id are required" });
+    }
+
+    const member = await Member.findById(member_id).lean();
+    if (!member || String(member.group) !== String(groupId)) {
+      return res.status(404).json({ error: "Member not found in this group" });
+    }
+
+    if (!member.date_of_birth) {
+      return res.status(400).json({ error: "Member missing date_of_birth" });
+    }
+
+    const age = calcAge(member.date_of_birth, effective_date);
+    if (age == null) {
+      return res.status(400).json({ error: "Could not compute age from date_of_birth" });
+    }
+
+    const isTobacco = (typeof tobacco === "boolean") ? tobacco : (member.tobacco ?? false);
+
+    const bench = await computeBenchmarkSilver({
+      countyId: county_id,
+      age,
+      tobacco: isTobacco,
+    });
+
+    if (bench.error) {
+      return res.status(400).json({ error: bench.error });
+    }
+
+    return res.json({
+      member: {
+        _id: member._id,
+        first_name: member.first_name,
+        last_name: member.last_name,
+        date_of_birth: member.date_of_birth,
+        zip_code: member.zip_code,
+        tobacco: isTobacco,
+      },
+      meta: {
+        county_id: String(county_id),
+        age,
+        tobacco: isTobacco,
+      },
+      benchmark: {
+        plan_id: bench.benchmark_plan_id,
+        premium: bench.benchmark_premium,
+        slcsp_rank: bench.slcsp_rank,
+      },
+      silver_candidates: bench.silver_candidates, // optional: remove if you want a smaller payload
+    });
+  } catch (err) {
+    console.error(">>> Error benchmarkForMember:", err);
+    return res.status(500).json({ error: "Failed to compute benchmark" });
   }
 };

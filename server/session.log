@@ -1,0 +1,217 @@
+Current Mongosh Log ID:	68bb27ec5c9f7e5be0526ed4
+Connecting to:		mongodb://127.0.0.1:27017/?directConnection=true&serverSelectionTimeoutMS=2000&appName=mongosh+2.5.7
+Using MongoDB:		7.0.22
+Using Mongosh:		2.5.7
+
+For mongosh info see: [1mhttps://www.mongodb.com/docs/mongodb-shell/[0m
+
+------
+   The server generated these startup warnings when booting
+   2025-09-04T11:00:28.458-05:00: Access control is not enabled for the database. Read and write access to data and configuration is unrestricted
+------
+
+test> 
+test> switched to db ichra
+ichra> 
+ichra> 
+ichra> 
+ichra> 
+ichra> 
+ichra> 
+ichra> 
+ichra> 
+ichra> 
+ichra> 
+ichra> 
+ichra> 
+ichra> 
+Referenced in plancounties for 41005,41051: 151
+
+ichra> Present in plans: 1
+
+ichra> Missing in plans: 150
+
+ichra> First 20 missing examples:
+
+ichra> [
+  '71287OR0420003-04',
+  '71287OR0420001',
+  '77969OR5280021-05',
+  '63474OR0600010',
+  '10091OR0750020',
+  '77969OR5290008-05',
+  '71287OR0420021',
+  '10091OR0750005-05',
+  '71287OR0420022-04',
+  '77969OR5280034',
+  '10091OR0750013-06',
+  '63474OR0600010-05',
+  '77969OR5290002',
+  '71287OR0420014',
+  '10091OR0750018',
+  '10091OR0750015',
+  '71287OR0420012',
+  '77969OR5280022-06',
+  '77969OR5280014-04',
+  '10091OR0760005'
+]
+
+ichra> 
+ichra> 
+ichra> 
+ichra> | | | [Function: baseIdOf]
+ichra> 
+ichra> 
+ichra> 
+ichra> 
+ichra> | | | | | | | | | | | | | | | | | | 
+ichra> 
+ichra> 
+Cloned plan docs created: 0
+
+ichra> | | | Could not clone 150 plan_ids (base missing or no suffix). First 20:
+[
+  {
+    pid: '71287OR0420003-04',
+    reason: 'base-not-found:71287OR0420003'
+  },
+  {
+    pid: '71287OR0420001',
+    reason: 'no-suffix'
+  },
+  {
+    pid: '77969OR5280021-05',
+    reason: 'base-not-found:77969OR5280021'
+  },
+  {
+    pid: '63474OR0600010',
+    reason: 'no-suffix'
+  },
+  {
+    pid: '10091OR0750020',
+    reason: 'no-suffix'
+  },
+  {
+    pid: '77969OR5290008-05',
+    reason: 'base-not-found:77969OR5290008'
+  },
+  {
+    pid: '71287OR0420021',
+    reason: 'no-suffix'
+  },
+  {
+    pid: '10091OR0750005-05',
+    reason: 'base-not-found:10091OR0750005'
+  },
+  {
+    pid: '71287OR0420022-04',
+    reason: 'base-not-found:71287OR0420022'
+  },
+  {
+    pid: '77969OR5280034',
+    reason: 'no-suffix'
+  },
+  {
+    pid: '10091OR0750013-06',
+    reason: 'base-not-found:10091OR0750013'
+  },
+  {
+    pid: '63474OR0600010-05',
+    reason: 'base-not-found:63474OR0600010'
+  },
+  {
+    pid: '77969OR5290002',
+    reason: 'no-suffix'
+  },
+  {
+    pid: '71287OR0420014',
+    reason: 'no-suffix'
+  },
+  {
+    pid: '10091OR0750018',
+    reason: 'no-suffix'
+  },
+  {
+    pid: '10091OR0750015',
+    reason: 'no-suffix'
+  },
+  {
+    pid: '71287OR0420012',
+    reason: 'no-suffix'
+  },
+  {
+    pid: '77969OR5280022-06',
+    reason: 'base-not-found:77969OR5280022'
+  },
+  {
+    pid: '77969OR5280014-04',
+    reason: 'base-not-found:77969OR5280014'
+  },
+  {
+    pid: '10091OR0760005',
+    reason: 'no-suffix'
+  }
+]
+
+ichra> 
+ichra> 
+ichra> 
+ichra> 
+ichra> 
+ichra> 
+ichra> 
+ichra> 
+ichra> 
+ichra> 
+ichra> 
+ichra> 
+ichra> | | | | | | | | | | | | | | | | | | | | | | | | | | | | | 
+ichra> 
+ichra> 
+Cloned pricing rows: 0
+
+ichra> 
+ichra> 
+ichra> {
+  acknowledged: true,
+  insertedId: null,
+  matchedCount: 1,
+  modifiedCount: 0,
+  upsertedCount: 0
+}
+ichra> {
+  acknowledged: true,
+  insertedId: null,
+  matchedCount: 0,
+  modifiedCount: 0,
+  upsertedCount: 0
+}
+ichra> {
+  acknowledged: true,
+  insertedId: null,
+  matchedCount: 0,
+  modifiedCount: 0,
+  upsertedCount: 0
+}
+ichra> 
+ichra> 
+Verify on-market Silver join in 41051:
+
+ichra> | | | | | | | | | []
+
+ichra> 
+ichra> 
+Verify on-market Silver join in 41005:
+
+ichra> | | | | | | | | | []
+
+ichra> 
+ichra> 
+ichra> 
+ichra> 
+Done.
+
+ichra> already on db ichra
+ichra> true
+ichra> true
+ichra> 

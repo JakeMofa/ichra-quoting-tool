@@ -16,4 +16,7 @@ router.get("/groups/:groupId/quotes", quoteController.getLatestQuotes);
 // GET → full history
 router.get("/groups/:groupId/quotes/history", quoteController.getQuoteHistory);
 
+// POST On-market benchmark (SLCSP) for one member + county (stateless)
+router.post("/groups/:groupId/quotes/benchmark", quoteController.benchmarkForMember);
+
 module.exports = router;
