@@ -15,7 +15,6 @@ const memberSchema = new mongoose.Schema(
   {
     // Relationships
     group: { type: mongoose.Schema.Types.ObjectId, ref: "Group", required: true },
-    ichra_class: { type: mongoose.Schema.Types.ObjectId, ref: "ICHRAClass", required: false },
     ichra_class: { type: mongoose.Schema.Types.ObjectId, ref: "ICHRAClass", default: null },
 
     // Member basics
@@ -30,22 +29,32 @@ const memberSchema = new mongoose.Schema(
     old_employee_contribution: { type: Number, default: 0 },
 
     // Address + location (Ideon addMember requires fips_code + location_id)
-    zip_code: {type: String,set: v => (v == null ? v : String(v).padStart(5, "0")), },
+    zip_code: {
+      type: String,
+      set: v => (v == null ? v : String(v).padStart(5, "0")),
+    },
     fips_code: { type: String },
     location_id: { type: String }, // Ideon location ID
 
-    // Household + affordability
-    household_income: { type: Number },
-    household_size: { type: Number },
+    // Household + affordability (existing)
+    household_income: { type: Number }, // keep if you already use it elsewhere
+    household_size: { type: Number, default: 1 },
     safe_harbor_income: { type: Number },
     annual_salary: { type: Number },
     hours_per_week: { type: Number },
+
+    //  MAGI inputs (annual $)
+    agi: { type: Number, default: 0 },                        // Adjusted Gross Income
+    nontaxable_social_security: { type: Number, default: 0 }, // add-back
+    tax_exempt_interest: { type: Number, default: 0 },        // add-back
+    foreign_earned_income: { type: Number, default: 0 },      // add-back
+    tax_year: { type: Number },                                // helps pick FPL/applicable % later
 
     // Dependents
     dependents: [dependentSchema],
 
     // Ideon reference & matching key for affordability results
-    ideon_member_id: { type: String },        // UUID from Ideon (if returned)
+    ideon_member_id: { type: String },             // UUID from Ideon (if returned)
     external_id: { type: String, required: true }, // Key we send to Ideon & match on
   },
   { timestamps: true }

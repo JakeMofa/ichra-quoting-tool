@@ -17,6 +17,7 @@ const Plan = require("../models/Plan");
 const PlanCounty = require("../models/PlanCounties");
 const ZipCounty = require("../models/ZipCounties");
 const QuoteResult = require("../models/QuoteResult");
+const { getFpl, applicablePct, expectedContributionMonthly } = require("../lib/premiumTaxCredit");
 
 // ---------------- helpers ----------------
 
@@ -610,12 +611,12 @@ exports.previewMemberQuotes = async (req, res) => {
 
 
 // POST /api/groups/:groupId/quotes/benchmark
-// Body: { member_id, county_id, effective_date?, tobacco? }
-// → Computes SLCSP (benchmark) for that member in that county (no DB writes).
+// Body: { member_id, county_id, effective_date?, tobacco?, state_code? }
+// → Computes SLCSP (benchmark) + subsidy math for that member in that county (no DB writes).
 exports.benchmarkForMember = async (req, res) => {
   try {
     const { groupId } = req.params;
-    const { member_id, county_id, effective_date, tobacco } = req.body || {};
+    const { member_id, county_id, effective_date, tobacco, state_code } = req.body || {};
 
     if (!member_id || !county_id) {
       return res.status(400).json({ error: "member_id and county_id are required" });
@@ -637,16 +638,91 @@ exports.benchmarkForMember = async (req, res) => {
 
     const isTobacco = (typeof tobacco === "boolean") ? tobacco : (member.tobacco ?? false);
 
+    // ---- Find SLCSP (benchmark) ----
     const bench = await computeBenchmarkSilver({
       countyId: county_id,
       age,
       tobacco: isTobacco,
     });
-
     if (bench.error) {
       return res.status(400).json({ error: bench.error });
     }
 
+    // ---- Steps 1–4: MAGI → %FPL → applicable % → expected contribution → subsidy ----
+
+    // Step 1: MAGI (annual)
+    const magi =
+      (member.agi ?? 0) +
+      (member.nontaxable_social_security ?? 0) +
+      (member.tax_exempt_interest ?? 0) +
+      (member.foreign_earned_income ?? 0);
+
+    // Step 2: FPL lookup
+    const taxYear = member.tax_year || 2025;
+    const hhSize = member.household_size || 1;
+    const stateCode = (state_code || member.state_code || "").toUpperCase(); // 'AK'|'HI'|''(48/DC)
+
+    let fpl = 0,
+        fplPercent = 0,
+        applicablePctVal = 0,
+        expectedMonthly = 0,
+        expectedAnnual = 0,
+        subsidyMonthly = 0;
+
+    try {
+      fpl = getFpl(taxYear, hhSize, stateCode);
+      fplPercent = fpl > 0 ? (magi / fpl) * 100 : 0;
+
+      // Step 3: Applicable % from sliding scale
+      applicablePctVal = applicablePct(fplPercent); // decimal, e.g. 0.085
+
+      // Step 4: Expected contribution (annual & monthly)
+      expectedAnnual = (Number(magi) || 0) * applicablePctVal;
+      expectedMonthly = expectedAnnual / 12;
+
+      // Subsidy = benchmark - expected monthly contribution
+      subsidyMonthly = Math.max(0, Number(bench.benchmark_premium) - expectedMonthly);
+    } catch (e) {
+      // If FPL not configured for taxYear (or other calc error), return benchmark but no subsidy
+      return res.json({
+        member: {
+          _id: member._id,
+          first_name: member.first_name,
+          last_name: member.last_name,
+          date_of_birth: member.date_of_birth,
+          zip_code: member.zip_code,
+          tobacco: isTobacco,
+        },
+        meta: { county_id: String(county_id), age, tobacco: isTobacco },
+        benchmark: {
+          plan_id: bench.benchmark_plan_id,
+          premium: Number(bench.benchmark_premium),
+          slcsp_rank: bench.slcsp_rank,
+        },
+        subsidy: {
+          error: e.message || "FPL not available for provided tax_year",
+          magi,
+          fpl_annual: null,
+          fpl_percent: null,
+          applicable_percentage: null,
+          expected_contribution_monthly: null,
+          expected_contribution_annual: null,
+          monthly: 0,
+          tax_year: taxYear,
+          household_size: hhSize,
+          state_code: stateCode || "48",
+        },
+        silver_candidates: bench.silver_candidates
+      });
+    }
+
+    // Add net premiums to the Silver list (optional but handy)
+    const silverWithNet = (bench.silver_candidates || []).map(p => ({
+      ...p,
+      net_premium: Math.max(0, Number(p.premium) - subsidyMonthly)
+    }));
+
+    // ---- Response ----
     return res.json({
       member: {
         _id: member._id,
@@ -663,10 +739,22 @@ exports.benchmarkForMember = async (req, res) => {
       },
       benchmark: {
         plan_id: bench.benchmark_plan_id,
-        premium: bench.benchmark_premium,
+        premium: Number(bench.benchmark_premium),
         slcsp_rank: bench.slcsp_rank,
       },
-      silver_candidates: bench.silver_candidates, // optional: remove if you want a smaller payload
+      subsidy: {
+        monthly: Math.round(subsidyMonthly * 100) / 100,
+        expected_contribution_monthly: Math.round(expectedMonthly * 100) / 100,
+        expected_contribution_annual: Math.round(expectedAnnual * 100) / 100,    // <— Step 4 exposed
+        applicable_percentage: Math.round(applicablePctVal * 1000) / 10,          // e.g. 0.085 → 8.5
+        magi,
+        fpl_annual: fpl,
+        fpl_percent: Math.round(fplPercent),
+        tax_year: taxYear,
+        household_size: hhSize,
+        state_code: stateCode || "48",
+      },
+      silver_candidates: silverWithNet,
     });
   } catch (err) {
     console.error(">>> Error benchmarkForMember:", err);

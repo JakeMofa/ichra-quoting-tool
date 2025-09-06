@@ -43,7 +43,7 @@ exports.createMember = async (req, res) => {
       groupLoc.fips_code ||
       null;
 
-    // 3) external_id is REQUIRED ( indexed it per group)
+    // 3) external_id is REQUIRED (indexed per group)
     const externalId = payload.external_id || genExternalId();
 
     // 4) Tries Ideon addMember if we have an Ideon group id and the required fields
@@ -96,7 +96,7 @@ exports.createMember = async (req, res) => {
       ideonMemberId = `mock-${uuidv4()}`;
     }
 
-    // 5) Save to Mongo —  persist external_id, fips_code, location_id
+    // 5) Save to Mongo — persist external_id, fips_code, location_id, and  MAGI inputs
     const memberDoc = new Member({
       group: groupId,
       ichra_class: payload.ichra_class || null,
@@ -111,9 +111,18 @@ exports.createMember = async (req, res) => {
       location_id: locationId,
 
       dependents: payload.dependents || [],
+
+      // household + affordability
       household_income: payload.household_income,
       safe_harbor_income: payload.safe_harbor_income,
       household_size: payload.household_size,
+
+      //  MAGI inputs
+      agi: payload.agi,
+      nontaxable_social_security: payload.nontaxable_social_security,
+      tax_exempt_interest: payload.tax_exempt_interest,
+      foreign_earned_income: payload.foreign_earned_income,
+      tax_year: payload.tax_year,
 
       ideon_member_id: ideonMemberId,
       external_id: externalId,
@@ -151,6 +160,13 @@ exports.createMember = async (req, res) => {
         safe_harbor_income: memberDoc.safe_harbor_income,
         household_size: memberDoc.household_size,
 
+        //  echo MAGI inputs
+        agi: memberDoc.agi,
+        nontaxable_social_security: memberDoc.nontaxable_social_security,
+        tax_exempt_interest: memberDoc.tax_exempt_interest,
+        foreign_earned_income: memberDoc.foreign_earned_income,
+        tax_year: memberDoc.tax_year,
+
         external_id: memberDoc.external_id,
         ideon_member_id: memberDoc.ideon_member_id,
         dependents: memberDoc.dependents,
@@ -162,7 +178,6 @@ exports.createMember = async (req, res) => {
     });
   } catch (err) {
     console.error(">>> Error creating member (outer catch):", err);
-    // If  enabled a unique index on (group, external_id), you may see Mongo 11000 dup key errors here.
     if (err?.code === 11000) {
       return res.status(409).json({ error: "Duplicate external_id for this group" });
     }
@@ -173,7 +188,8 @@ exports.createMember = async (req, res) => {
 // GET /api/groups/:groupId/members
 exports.getMembersByGroup = async (req, res) => {
   try {
-    const members = await Member.find({ group: req.params.groupId }).populate("ichra_class");
+
+    const members = await Member.find({ group: req.params.groupId }).populate({ path: 'ichra_class', model: 'ICHRAClass' });
     res.json(
       members.map((m) => ({
         _id: m._id,
@@ -190,6 +206,13 @@ exports.getMembersByGroup = async (req, res) => {
         household_income: m.household_income,
         safe_harbor_income: m.safe_harbor_income,
         household_size: m.household_size,
+
+        //  MAGI inputs
+        agi: m.agi,
+        nontaxable_social_security: m.nontaxable_social_security,
+        tax_exempt_interest: m.tax_exempt_interest,
+        foreign_earned_income: m.foreign_earned_income,
+        tax_year: m.tax_year,
 
         external_id: m.external_id,
         ideon_member_id: m.ideon_member_id,
@@ -227,7 +250,7 @@ exports.updateMember = async (req, res) => {
       old_employer_contribution,     // Number
       old_employee_contribution,     // Number
 
-      // optional
+      // optional household & location
       household_income,
       safe_harbor_income,
       household_size,
@@ -236,6 +259,13 @@ exports.updateMember = async (req, res) => {
       location_id,
       gender,
       date_of_birth,
+
+      //  MAGI inputs
+      agi,
+      nontaxable_social_security,
+      tax_exempt_interest,
+      foreign_earned_income,
+      tax_year,
     } = req.body || {};
 
     // (1) Reassign class if provided (and belongs to this group)
@@ -263,9 +293,15 @@ exports.updateMember = async (req, res) => {
     if (safe_harbor_income != null) member.safe_harbor_income = Number(safe_harbor_income);
     if (household_size != null) member.household_size = Number(household_size);
 
-    // (4) Location & demographic updates
+    // (4)  MAGI inputs
+    if (agi != null) member.agi = Number(agi);
+    if (nontaxable_social_security != null) member.nontaxable_social_security = Number(nontaxable_social_security);
+    if (tax_exempt_interest != null) member.tax_exempt_interest = Number(tax_exempt_interest);
+    if (foreign_earned_income != null) member.foreign_earned_income = Number(foreign_earned_income);
+    if (tax_year != null) member.tax_year = Number(tax_year);
+
+    // (5) Location & demographic updates
     if (zip_code != null) {
-      // accept number or string; store as 5-digit string
       const z = String(zip_code).trim();
       const z5 = z.padStart(5, "0").slice(0, 5);
       if (!/^\d{5}$/.test(z5)) {
@@ -287,5 +323,18 @@ exports.updateMember = async (req, res) => {
   } catch (err) {
     console.error(">>> Error updating member:", err);
     return res.status(500).json({ error: "Failed to update member", details: err.message });
+  }
+};
+
+
+exports.getMemberById = async (req, res) => {
+  const { groupId, memberId } = req.params;
+  try {
+    const m = await Member.findOne({ _id: memberId, group: groupId })
+      .populate({ path: 'ichra_class', model: 'ICHRAClass' });
+    if (!m) return res.status(404).json({ error: 'Member not found' });
+    res.json(m);
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to fetch member' });
   }
 };

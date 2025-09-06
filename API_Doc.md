@@ -93,6 +93,20 @@ Fetch full quote history (all batches).
 
 ---
 
+## Benchmark (SLCSP) — Find the second-lowest Silver premium
+
+**POST** `/groups/:groupId/quotes/benchmark`  
+Returns the benchmark (SLCSP) for a specific member, scoped by county, age (from DOB), and tobacco flag.
+
+### Request Body
+```json
+{
+  "member_id": "string (Member _id, required)",
+  "county_id": "string (FIPS-like county id, required)",
+  "effective_date": "YYYY-MM-DD (optional, defaults today)",
+  "tobacco": false
+}
+
 ## Data Imports (CSV → Mongo)
 Run scripts from `/scripts` to load reference data:  
 - `importPlans.js`  

@@ -12,4 +12,7 @@ router.get("/", memberController.getMembersByGroup);
 // PATCH /api/groups/:groupId/members/:memberId → update class & old contributions
 router.patch("/:memberId", memberController.updateMember);
 
+// route
+router.get('/groups/:groupId/members/:memberId', memberController.getMemberById);
+
 module.exports = router;
