@@ -1,7 +1,6 @@
 // Collections used (models):
 // - Group            : employer groups
 // - Member           : employees (date_of_birth, zip_code, tobacco, etc.)
-// - AffordabilityResult : latest Ideon (or fallback) affordability outcomes
 // - ZipCounty        : map ZIP -> county_id (CSV: zip_counties.csv)
 // - PlanCounty       : map county_id -> plan_id (CSV: plan_counties.csv)
 // - Pricing          : plan premiums by (plan_id, age, tobacco) (CSV: pricings.csv)
@@ -11,9 +10,12 @@
 // server/controllers/quoteController.js
 const Group = require("../models/Group");
 const Member = require("../models/Member");
-const AffordabilityResult = require("../models/AfforadabilityResult");
+// If you still store affordability snapshots, re-enable and use it where you persist:
+// const AffordabilityResult = require("../models/AffordabilityResult");
+const { ensureIdeonAffordability } = require("../controllers/affordabilityHelpers.js");
 const Pricing = require("../models/Pricing");
 const Plan = require("../models/Plan");
+const ICHRAClass = require("../models/ICHRAClass");
 const PlanCounty = require("../models/PlanCounties");
 const ZipCounty = require("../models/ZipCounties");
 const QuoteResult = require("../models/QuoteResult");
@@ -33,7 +35,6 @@ function calcAge(dob, effectiveDateStr) {
 }
 
 // Return unique county_ids for a 5-digit ZIP (string or number).
-// Uses ZipCounties.zip_code_id (your schema) and tolerates string/number.
 async function countiesForZip(zip5) {
   if (!zip5) return [];
   const zstr = String(zip5).trim().slice(0, 5);
@@ -117,7 +118,7 @@ function transformQuoteDoc(doc) {
       return {
         member: memberBlock,
         affordability: affordabilityBlock,
-        meta: q.meta || null, // include metadata like county selection issues
+        meta: q.meta || null,
         quotes: dedupedPlans,
       };
     }),
@@ -125,11 +126,7 @@ function transformQuoteDoc(doc) {
   };
 }
 
-
-
 // --- On-market SLCSP (Benchmark) helper -------------------------------------
-// Returns the 2nd-lowest premium silver plan for (countyId, age, tobacco).
-// If only one priced silver plan exists, we fall back to the lowest (rank=1).
 async function computeBenchmarkSilver({ countyId, age, tobacco }) {
   const county_id = String(countyId);
 
@@ -137,7 +134,7 @@ async function computeBenchmarkSilver({ countyId, age, tobacco }) {
   const planCountyRows = await PlanCounty.find({ county_id })
     .select({ plan_id: 1, _id: 0 })
     .lean();
-  const planIds = Array.from(new Set(planCountyRows.map(r => r.plan_id)));
+  const planIds = Array.from(new Set(planCountyRows.map((r) => r.plan_id)));
   if (!planIds.length) {
     return { error: `No plans in county_id ${county_id}` };
   }
@@ -146,7 +143,7 @@ async function computeBenchmarkSilver({ countyId, age, tobacco }) {
   const silverPlans = await Plan.find({
     plan_id: { $in: planIds },
     on_market: true,
-    level: /silver/i, // tolerate "Silver" / "silver"
+    level: /silver/i,
   })
     .select({
       plan_id: 1,
@@ -163,7 +160,7 @@ async function computeBenchmarkSilver({ countyId, age, tobacco }) {
   }
 
   // 3) Pricing for this age+tobacco across those silver plans
-  const silverIds = silverPlans.map(p => p.plan_id);
+  const silverIds = silverPlans.map((p) => p.plan_id);
   const pricingRows = await Pricing.find({
     plan_id: { $in: silverIds },
     age,
@@ -173,14 +170,18 @@ async function computeBenchmarkSilver({ countyId, age, tobacco }) {
     .lean();
 
   if (!pricingRows.length) {
-    return { error: `No pricing for Silver plans at age ${age} (tobacco=${!!tobacco})` };
+    return {
+      error: `No pricing for Silver plans at age ${age} (tobacco=${!!tobacco})`,
+    };
   }
 
-  const premByPlan = new Map(pricingRows.map(p => [p.plan_id, Number(p.premium)]));
+  const premByPlan = new Map(
+    pricingRows.map((p) => [p.plan_id, Number(p.premium)])
+  );
 
   // 4) Merge plan meta + premium, filter out missing premiums, rank ascending
   const ranked = silverPlans
-    .map(p => ({
+    .map((p) => ({
       plan_id: p.plan_id,
       premium: premByPlan.get(p.plan_id),
       carrier_name: p.carrier_name,
@@ -188,11 +189,13 @@ async function computeBenchmarkSilver({ countyId, age, tobacco }) {
       plan_type: p.plan_type,
       level: p.level,
     }))
-    .filter(x => Number.isFinite(x.premium))
+    .filter((x) => Number.isFinite(x.premium))
     .sort((a, b) => a.premium - b.premium);
 
   if (!ranked.length) {
-    return { error: `No priced Silver plans after filtering (age ${age}, tobacco=${!!tobacco})` };
+    return {
+      error: `No priced Silver plans after filtering (age ${age}, tobacco=${!!tobacco})`,
+    };
   }
 
   // 5) Pick SLCSP: index 1 if available, else index 0 fallback
@@ -202,16 +205,15 @@ async function computeBenchmarkSilver({ countyId, age, tobacco }) {
   return {
     benchmark_plan_id: chosen.plan_id,
     benchmark_premium: chosen.premium,
-    slcsp_rank: idx + 1, // 2 when we truly have 2+, else 1 fallback
-    silver_candidates: ranked, // full ranked list for transparency/debug
+    slcsp_rank: idx + 1,
+    silver_candidates: ranked,
   };
 }
 
-// -----------Generate Quotes----- controllers ----------------
+// -------------------- Controllers --------------------
 
 // POST /api/groups/:groupId/quotes
-// Generates a batch of off-market quotes for ALL members in the group.
-// Handles multi-county ZIPs via: request override -> member.fips_code -> unique-from-zip -> else skip.
+// Generates a batch of quotes for ALL members in the group (on-market subsidy applied; off-market full price)
 exports.generateQuotes = async (req, res) => {
   const { groupId } = req.params;
   const { effective_date, tobacco } = req.body || {}; // optional overrides for the run
@@ -362,38 +364,88 @@ exports.generateQuotes = async (req, res) => {
         })
         .lean();
 
-      // --- Latest affordability for the member (if present)
-      const affordability = await AffordabilityResult.findOne({
-        group: groupId,
-        member: member._id,
-      })
-        .sort({ createdAt: -1 })
-        .lean();
+      // --- Ideon (Option B): get affordability / PTC if possible
+      let ichra = null;
+      try {
+        ichra = await ensureIdeonAffordability({
+          group,
+          member,
+          effective_date:
+            req.body?.effective_date || new Date().toISOString().slice(0, 10), // 'YYYY-MM-DD'
+          county_id: String(countyId),
+        });
+      } catch (e) {
+        console.warn(
+          "ensureIdeonAffordability failed (continuing):",
+          e?.message || e
+        );
+      }
 
-      // For off-market: keep your prior behavior (adjusted_cost = premium - credit).
-      // If you don't want PTC to affect off-market, set credit = 0.
-      const credit = affordability?.premium_tax_credit
-        ? Number(affordability.premium_tax_credit)
-        : 0;
+      // --- Compute subsidy: prefer Ideon PTC; else fall back to internal SLCSP/FPL math
+      let subsidyMonthly = 0;
+      try {
+        if (ichra && Number.isFinite(Number(ichra.premium_tax_credit))) {
+          subsidyMonthly = Number(ichra.premium_tax_credit);
+        } else {
+          const bench = await computeBenchmarkSilver({
+            countyId: countyId,
+            age,
+            tobacco: isTobacco,
+          });
 
-      const quotes = plans.map((pl) => {
-        const premium = priceByPlan.get(pl.plan_id);
-        return {
-          plan_id: pl.plan_id,
-          premium,
-          adjusted_cost: Math.max(0, premium - credit),
-          benchmark_plan_id: affordability?.benchmark_plan_id ?? null,
-          benchmark_premium: affordability?.benchmark_premium ?? null,
-          plan_details: pl,
-        };
-      });
+          if (!bench.error) {
+            const magi =
+              (member.agi ?? 0) +
+              (member.nontaxable_social_security ?? 0) +
+              (member.tax_exempt_interest ?? 0) +
+              (member.foreign_earned_income ?? 0);
 
-      // Sort by premium ascending
-      quotes.sort((a, b) => a.premium - b.premium);
+            const taxYear = member.tax_year || 2025;
+            const stateCode = (member.state_code || "").toUpperCase(); // 'AK'|'HI'|'' => 48/DC
+            const fpl = getFpl(taxYear, member.household_size || 1, stateCode);
+            const fplPct = fpl > 0 ? (magi / fpl) * 100 : 0;
+            const expected = expectedContributionMonthly(magi, fplPct);
 
+            subsidyMonthly = Math.max(
+              0,
+              Number(bench.benchmark_premium) - expected
+            );
+          }
+        }
+      } catch (e) {
+        subsidyMonthly = 0; // fail-safe: no subsidy
+      }
+
+      // --- Apply subsidy ONLY to ON-MARKET plans; off-market stays full price
+      const quotes = plans
+        .map((pl) => {
+          const premium = priceByPlan.get(pl.plan_id);
+          const net = pl.on_market ? Math.max(0, premium - subsidyMonthly) : premium;
+
+          return {
+            plan_id: pl.plan_id,
+            premium,
+            adjusted_cost: Math.round(net * 100) / 100,
+            benchmark_plan_id: ichra?.benchmark_plan_id ?? null,
+            benchmark_premium: ichra?.benchmark_premium ?? null,
+            plan_details: pl,
+          };
+        })
+        .sort((a, b) => a.adjusted_cost - b.adjusted_cost);
+
+      // --- Push one member’s bundle into the batch
       batchQuotes.push({
         member: member._id,
-        affordability: affordability || null,
+        affordability: ichra
+          ? {
+              fpl_percent: ichra.fpl_percent ?? null,
+              expected_contribution: ichra.expected_contribution ?? null,
+              benchmark_plan_id: ichra.benchmark_plan_id ?? null,
+              benchmark_premium: ichra.benchmark_premium ?? null,
+              premium_tax_credit: ichra.premium_tax_credit ?? null,
+              affordable: ichra.affordable ?? null,
+            }
+          : null,
         meta: {
           zip_code: member.zip_code,
           county_id: countyId,
@@ -403,8 +455,9 @@ exports.generateQuotes = async (req, res) => {
         },
         quotes,
       });
-    }
+    } // <<--- end for (const member of members)
 
+    // --- Save the batch and respond
     const quoteDoc = new QuoteResult({
       group: groupId,
       quotes: batchQuotes,
@@ -412,7 +465,6 @@ exports.generateQuotes = async (req, res) => {
     });
     await quoteDoc.save();
 
-    // Populate for a trimmed response
     const populated = await QuoteResult.findById(quoteDoc._id)
       .populate("group", "company_name contact_name contact_email")
       .populate(
@@ -472,22 +524,16 @@ exports.getQuoteHistory = async (req, res) => {
 };
 
 // POST /api/groups/:groupId/quotes/preview
-// Body: { member_id: "<ObjectId>", county_id: "<string>", effective_date?: "YYYY-MM-DD", tobacco?: boolean }
+// Body: { member_id, county_id, effective_date?, tobacco?, state_code? }
 // Returns quotes for ONE member in ONE selected county. Does NOT save a QuoteResult.
 exports.previewMemberQuotes = async (req, res) => {
   const { groupId } = req.params;
-  const { member_id, county_id, effective_date, tobacco } = req.body || {};
+  const { member_id, county_id, effective_date, tobacco, state_code } = req.body || {};
 
   try {
-    // Basic guards
-    if (!member_id) {
-      return res.status(400).json({ error: "member_id is required" });
-    }
-    if (!county_id) {
-      return res.status(400).json({ error: "county_id is required (choose one from the list returned by /quotes)" });
-    }
+    if (!member_id) return res.status(400).json({ error: "member_id is required" });
+    if (!county_id) return res.status(400).json({ error: "county_id is required (choose one)" });
 
-    // Group & Member
     const group = await Group.findById(groupId);
     if (!group) return res.status(404).json({ error: "Group not found" });
 
@@ -496,21 +542,20 @@ exports.previewMemberQuotes = async (req, res) => {
       return res.status(404).json({ error: "Member not found in this group" });
     }
 
-    // Age & tobacco
     if (!member.date_of_birth) {
       return res.status(400).json({ error: "Member is missing date_of_birth" });
     }
+
     const age = calcAge(member.date_of_birth, effective_date);
-    if (age == null) {
-      return res.status(400).json({ error: "Could not compute member age" });
-    }
+    if (age == null) return res.status(400).json({ error: "Could not compute member age" });
+
     const isTobacco = (typeof tobacco === "boolean") ? tobacco : (member.tobacco ?? false);
 
     // Plans in selected county
     const planCountyRows = await PlanCounty.find({ county_id: String(county_id) })
       .select({ plan_id: 1, _id: 0 })
       .lean();
-    const planIds = Array.from(new Set(planCountyRows.map(r => r.plan_id)));
+    const planIds = Array.from(new Set(planCountyRows.map((r) => r.plan_id)));
     if (!planIds.length) {
       return res.json({
         member: { _id: member._id, first_name: member.first_name, last_name: member.last_name },
@@ -527,6 +572,7 @@ exports.previewMemberQuotes = async (req, res) => {
     })
       .select({ plan_id: 1, premium: 1, _id: 0 })
       .lean();
+
     if (!pricingRows.length) {
       return res.json({
         member: { _id: member._id, first_name: member.first_name, last_name: member.last_name },
@@ -535,10 +581,10 @@ exports.previewMemberQuotes = async (req, res) => {
       });
     }
 
-    const priceByPlan = new Map(pricingRows.map(p => [p.plan_id, Number(p.premium)]));
-    const pricedPlanIds = planIds.filter(pid => priceByPlan.has(pid));
+    const priceByPlan = new Map(pricingRows.map((p) => [p.plan_id, Number(p.premium)]));
+    const pricedPlanIds = planIds.filter((pid) => priceByPlan.has(pid));
 
-    // Plan details
+    // Plan details (need on_market flag)
     const plans = await Plan.find({ plan_id: { $in: pricedPlanIds } })
       .select({
         plan_id: 1,
@@ -554,31 +600,61 @@ exports.previewMemberQuotes = async (req, res) => {
       })
       .lean();
 
-    // Optional affordability snapshot
-    const affordability = await AffordabilityResult.findOne({
-      group: groupId,
-      member: member._id,
-    })
-      .sort({ createdAt: -1 })
-      .lean();
+    // --- Compute benchmark + subsidy (Steps 1–5) ---
+    const bench = await computeBenchmarkSilver({
+      countyId: county_id,
+      age,
+      tobacco: isTobacco,
+    });
 
-    const credit = affordability?.premium_tax_credit
-      ? Number(affordability.premium_tax_credit)
-      : 0;
+    // Default subsidy = 0 if we cannot compute benchmark or MAGI/FPL inputs are missing
+    let subsidyMonthly = 0;
+    let expectedMonthly = 0;
+    let fpl = null;
+    let fplPercent = null;
+    let appPct = null;
 
-    const quotes = plans.map(pl => {
-      const premium = priceByPlan.get(pl.plan_id);
-      return {
-        plan_id: pl.plan_id,
-        premium,
-        adjusted_cost: Math.max(0, premium - credit),
-        benchmark_plan_id: affordability?.benchmark_plan_id ?? null,
-        benchmark_premium: affordability?.benchmark_premium ?? null,
-        plan_details: pl,
-      };
-    }).sort((a, b) => a.premium - b.premium);
+    if (!bench.error) {
+      // MAGI
+      const magi =
+        (member.agi ?? 0) +
+        (member.nontaxable_social_security ?? 0) +
+        (member.tax_exempt_interest ?? 0) +
+        (member.foreign_earned_income ?? 0);
 
-    // Stateless response (not saved to QuoteResult)
+      const taxYear = member.tax_year || 2025;
+      try {
+        // FPL + %FPL
+        fpl = getFpl(taxYear, member.household_size || 1, state_code);
+        fplPercent = fpl > 0 ? (magi / fpl) * 100 : 0;
+
+        // Applicable % and expected contribution
+        appPct = applicablePct(fplPercent);
+        expectedMonthly = expectedContributionMonthly(magi, fplPercent);
+
+        // Subsidy = max(0, benchmark - expected)
+        subsidyMonthly = Math.max(0, Number(bench.benchmark_premium) - expectedMonthly);
+      } catch {
+        // keep subsidy at 0 if FPL table not available
+      }
+    }
+
+    // Build quotes applying subsidy only to on-market plans
+    const quotes = plans
+      .map((pl) => {
+        const premium = priceByPlan.get(pl.plan_id);
+        const net = pl.on_market ? Math.max(0, premium - subsidyMonthly) : premium;
+
+        return {
+          plan_id: pl.plan_id,
+          premium,
+          net_premium: Math.round(net * 100) / 100,
+          plan_details: pl,
+        };
+      })
+      .sort((a, b) => a.net_premium - b.net_premium);
+
+    // Response
     return res.json({
       member: {
         _id: member._id,
@@ -588,27 +664,33 @@ exports.previewMemberQuotes = async (req, res) => {
         zip_code: member.zip_code,
         tobacco: member.tobacco ?? false,
       },
-      affordability: affordability ? {
-        fpl_percent: affordability.fpl_percent,
-        expected_contribution: affordability.expected_contribution,
-        benchmark_plan_id: affordability.benchmark_plan_id,
-        benchmark_premium: affordability.benchmark_premium,
-        premium_tax_credit: affordability.premium_tax_credit,
-        affordable: affordability.affordable,
-      } : null,
       meta: {
         county_id: String(county_id),
         age,
         tobacco: isTobacco,
       },
-      quotes
+      benchmark: bench.error
+        ? null
+        : {
+            plan_id: bench.benchmark_plan_id,
+            premium: Number(bench.benchmark_premium),
+            slcsp_rank: bench.slcsp_rank,
+          },
+      subsidy: {
+        monthly: Math.round(subsidyMonthly * 100) / 100,
+        expected_contribution_monthly: Math.round(expectedMonthly * 100) / 100,
+        applicable_percentage:
+          appPct == null ? null : Math.round(appPct * 1000) / 10, // e.g. 8.5
+        fpl_annual: fpl,
+        fpl_percent: fplPercent == null ? null : Math.round(fplPercent),
+      },
+      quotes,
     });
   } catch (err) {
     console.error(">>> Error in previewMemberQuotes:", err);
     return res.status(500).json({ error: "Failed to preview quotes" });
   }
 };
-
 
 // POST /api/groups/:groupId/quotes/benchmark
 // Body: { member_id, county_id, effective_date?, tobacco?, state_code? }
@@ -663,11 +745,11 @@ exports.benchmarkForMember = async (req, res) => {
     const stateCode = (state_code || member.state_code || "").toUpperCase(); // 'AK'|'HI'|''(48/DC)
 
     let fpl = 0,
-        fplPercent = 0,
-        applicablePctVal = 0,
-        expectedMonthly = 0,
-        expectedAnnual = 0,
-        subsidyMonthly = 0;
+      fplPercent = 0,
+      applicablePctVal = 0,
+      expectedMonthly = 0,
+      expectedAnnual = 0,
+      subsidyMonthly = 0;
 
     try {
       fpl = getFpl(taxYear, hhSize, stateCode);
@@ -712,14 +794,14 @@ exports.benchmarkForMember = async (req, res) => {
           household_size: hhSize,
           state_code: stateCode || "48",
         },
-        silver_candidates: bench.silver_candidates
+        silver_candidates: bench.silver_candidates,
       });
     }
 
     // Add net premiums to the Silver list (optional but handy)
-    const silverWithNet = (bench.silver_candidates || []).map(p => ({
+    const silverWithNet = (bench.silver_candidates || []).map((p) => ({
       ...p,
-      net_premium: Math.max(0, Number(p.premium) - subsidyMonthly)
+      net_premium: Math.max(0, Number(p.premium) - subsidyMonthly),
     }));
 
     // ---- Response ----
@@ -745,8 +827,8 @@ exports.benchmarkForMember = async (req, res) => {
       subsidy: {
         monthly: Math.round(subsidyMonthly * 100) / 100,
         expected_contribution_monthly: Math.round(expectedMonthly * 100) / 100,
-        expected_contribution_annual: Math.round(expectedAnnual * 100) / 100,    // <— Step 4 exposed
-        applicable_percentage: Math.round(applicablePctVal * 1000) / 10,          // e.g. 0.085 → 8.5
+        expected_contribution_annual: Math.round(expectedAnnual * 100) / 100, // Step 4
+        applicable_percentage: Math.round(applicablePctVal * 1000) / 10, // e.g. 0.085 → 8.5
         magi,
         fpl_annual: fpl,
         fpl_percent: Math.round(fplPercent),
@@ -759,5 +841,130 @@ exports.benchmarkForMember = async (req, res) => {
   } catch (err) {
     console.error(">>> Error benchmarkForMember:", err);
     return res.status(500).json({ error: "Failed to compute benchmark" });
+  }
+};
+
+
+
+// --- Employer Comparison summary (monthly + annual) --------------------------
+exports.employerSummary = async (req, res) => {
+  const { groupId } = req.params;
+
+  try {
+    // 1) Load group (we only need id + name here)
+    const group = await Group.findById(groupId).select("_id company_name classes").lean();
+    if (!group) return res.status(404).json({ error: "Group not found" });
+
+    // 2) Load members with fields we need (include dependents!)
+    const members = await Member.find({ group: groupId })
+      .select({
+        ichra_class: 1,
+        old_employer_contribution: 1,
+        dependents: 1,
+        first_name: 1,
+        last_name: 1,
+      })
+      .lean();
+
+    // 3) Old employer monthly total
+    const oldMonthlyTotal = members.reduce(
+      (sum, m) => sum + (Number(m.old_employer_contribution) || 0),
+      0
+    );
+
+    // 4) Build class map { classId -> {name, emp, dep} }
+    //    Prefer querying classes by ids (robust even if group.classes isn't populated)
+    const classIds = [
+      ...new Set(members.map(m => m.ichra_class).filter(Boolean).map(String)),
+    ];
+    let classes = [];
+    if (classIds.length) {
+      classes = await ICHRAClass.find({ _id: { $in: classIds } })
+        .select("name employee_contribution dependent_contribution")
+        .lean();
+    }
+    const classMap = new Map(
+      classes.map(c => [
+        String(c._id),
+        {
+          name: c.name || null,
+          employee_contribution: Number(c.employee_contribution) || 0,
+          dependent_contribution: Number(c.dependent_contribution) || 0,
+        },
+      ])
+    );
+
+    // 5) Sum ICHRA monthly using employee + dependents * dependent_contribution
+    let newMonthlyTotal = 0;
+    const byClass = {}; // breakdown
+
+    for (const m of members) {
+      const cid = m.ichra_class ? String(m.ichra_class) : null;
+      if (!cid || !classMap.has(cid)) continue;
+
+      const cls = classMap.get(cid);
+      const depCount = Array.isArray(m.dependents) ? m.dependents.length : 0;
+      const amount = cls.employee_contribution + depCount * cls.dependent_contribution;
+
+      newMonthlyTotal += amount;
+
+      if (!byClass[cid]) {
+        byClass[cid] = {
+          name: cls.name,
+          count: 0,
+          monthlyTotal: 0,
+        };
+      }
+      byClass[cid].count += 1;
+      byClass[cid].monthlyTotal += amount;
+    }
+
+    // 6) Annualize + savings
+    const oldAnnualTotal = oldMonthlyTotal * 12;
+    const newAnnualTotal = newMonthlyTotal * 12;
+
+    const monthlySavings = oldMonthlyTotal - newMonthlyTotal;
+    const annualSavings = oldAnnualTotal - newAnnualTotal;
+
+    return res.json({
+      group: { _id: group._id, company_name: group.company_name },
+      counts: {
+        members: members.length,
+        classes: new Set(classIds).size,
+        members_with_class: Object.values(byClass).reduce((n, x) => n + x.count, 0),
+      },
+      employer_comparison: {
+        old: {
+          monthly_total: round2(oldMonthlyTotal),
+          annual_total: round2(oldAnnualTotal),
+        },
+        ichra: {
+          monthly_total: round2(newMonthlyTotal),
+          annual_total: round2(newAnnualTotal),
+        },
+        savings: {
+          monthly: round2(monthlySavings),
+          annual: round2(annualSavings),
+        },
+      },
+      breakdown_by_class: Object.fromEntries(
+        Object.entries(byClass).map(([id, v]) => [
+          id,
+          {
+            name: v.name,
+            members: v.count,
+            monthly_total: round2(v.monthlyTotal),
+            annual_total: round2(v.monthlyTotal * 12),
+          },
+        ])
+      ),
+    });
+  } catch (err) {
+    console.error(">>> employerSummary error:", err);
+    return res.status(500).json({ error: "Failed to compute employer comparison" });
+  }
+
+  function round2(n) {
+    return Math.round((Number(n) || 0) * 100) / 100;
   }
 };

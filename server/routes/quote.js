@@ -19,4 +19,7 @@ router.get("/groups/:groupId/quotes/history", quoteController.getQuoteHistory);
 // POST On-market benchmark (SLCSP) for one member + county (stateless)
 router.post("/groups/:groupId/quotes/benchmark", quoteController.benchmarkForMember);
 
+// Employer comparison summary
+router.get("/groups/:groupId/summary/employer", quoteController.employerSummary);
+
 module.exports = router;

@@ -8,45 +8,42 @@
 
 require("dotenv").config();
 const axios = require("axios");
+const Bottleneck = require("bottleneck");
 
 // --- Config ---
 const IDEON_API_KEY = process.env.IDEON_API_KEY || process.env.VERICRED_API_KEY || "";
-const IDEON_BASE_URL = process.env.IDEON_BASE_URL || "https://api.ideonapi.com";
+const IDEON_BASE_URL = process.env.IDEON_BASE_URL || "https://api.ideonapi.com";  
 
-// Throttle: minimum delay between requests (ms). 700ms ≈ 85 req/min, safe under shared 100 rpm.
-const MIN_DELAY_MS = Number(process.env.IDEON_MIN_DELAY_MS || 700);
+// Throttle / rate limit
+const MIN_DELAY_FALLBACK_MS = Number(process.env.IDEON_MIN_DELAY_MS || 700);
 
 // Retry/backoff for 429/5xx
-const MAX_RETRIES = Number(process.env.IDEON_MAX_RETRIES || 3);
-const INITIAL_BACKOFF_MS = Number(process.env.IDEON_INITIAL_BACKOFF_MS || 500);
+const MAX_RETRIES = Number(process.env.IDEON_RETRY_MAX || 3);
+const INITIAL_BACKOFF_MS = Number(process.env.IDEON_RETRY_BASE_DELAY_MS || 500);
+
+// Bottleneck config (respects 100 rpm by default)
+const limiter = new Bottleneck({
+  reservoir: Number(process.env.IDEON_RATE_RESERVOIR || 100), // max tokens
+  reservoirRefreshAmount: Number(process.env.IDEON_RATE_RESERVOIR || 100),
+  reservoirRefreshInterval: Number(process.env.IDEON_RATE_INTERVAL_MS || 60000), // 1 minute
+  minTime: Number(process.env.IDEON_RATE_MIN_TIME_MS || MIN_DELAY_FALLBACK_MS),
+});
+
+const IDEON_LOG = String(process.env.IDEON_LOG || "false").toLowerCase() === "true";
 
 // --- Axios instance ---
 const api = axios.create({
   baseURL: IDEON_BASE_URL,
   headers: {
-    // Ideon historically accepted "Vericred-Api-Key". Some envs allow "Ideon-Api-Key".
-    // Sending both is harmless; server will ignore extras.
     "Vericred-Api-Key": IDEON_API_KEY,
     "Ideon-Api-Key": IDEON_API_KEY,
     "Authorization": `Bearer ${IDEON_API_KEY}`,
     "Content-Type": "application/json",
     "Accept": "application/json",
-    // Pin version so changes to default don’t surprise us.
-    "Accept-Version": "v6",
+    "Accept-Version": "v6", // pin version
   },
   timeout: 15000,
 });
-
-// --- Simple throttle (one request every MIN_DELAY_MS) ---
-let lastRequestAt = 0;
-async function throttle() {
-  const now = Date.now();
-  const wait = Math.max(0, lastRequestAt + MIN_DELAY_MS - now);
-  if (wait > 0) {
-    await new Promise((r) => setTimeout(r, wait));
-  }
-  lastRequestAt = Date.now();
-}
 
 // --- Retry wrapper ---
 async function requestWithRetry(fn, retries = MAX_RETRIES, backoff = INITIAL_BACKOFF_MS) {
@@ -56,8 +53,10 @@ async function requestWithRetry(fn, retries = MAX_RETRIES, backoff = INITIAL_BAC
     const status = err.response?.status;
     const retriable = status === 429 || (status >= 500 && status <= 599);
     if (retriable && retries > 0) {
-      console.warn(`[Ideon] HTTP ${status}. Retrying in ${backoff}ms...`);
-      await new Promise((r) => setTimeout(r, backoff));
+      const retryAfter = err.response?.headers?.["retry-after"];
+      const waitMs = retryAfter ? Number(retryAfter) * 1000 : backoff;
+      if (IDEON_LOG) console.warn(`[Ideon] HTTP ${status}. Retrying in ${waitMs}ms...`);
+      await new Promise((r) => setTimeout(r, waitMs));
       return requestWithRetry(fn, retries - 1, Math.min(backoff * 2, 8000));
     }
     console.error("[Ideon] request failed:", {
@@ -69,17 +68,19 @@ async function requestWithRetry(fn, retries = MAX_RETRIES, backoff = INITIAL_BAC
   }
 }
 
-// --- Low-level HTTP helpers with throttle+retry ---
+// --- Low-level HTTP helpers with Bottleneck + retry ---
 async function POST(path, data) {
-  await throttle();
-  console.log(`[Ideon] POST ${path}`);
-  return requestWithRetry(() => api.post(path, data));
+  return limiter.schedule(async () => {
+    if (IDEON_LOG) console.log(`[Ideon] POST ${path}`);
+    return requestWithRetry(() => api.post(path, data));
+  });
 }
 
 async function GET(path, params) {
-  await throttle();
-  console.log(`[Ideon] GET ${path}`);
-  return requestWithRetry(() => api.get(path, { params }));
+  return limiter.schedule(async () => {
+    if (IDEON_LOG) console.log(`[Ideon] GET ${path}`);
+    return requestWithRetry(() => api.get(path, { params }));
+  });
 }
 
 // --- Public API ---
@@ -97,8 +98,6 @@ async function addMember(groupId, memberData) {
 // 3) ICHRA affordability (NESTED under /groups/{id})
 async function startICHRA(groupId, payload) {
   if (!groupId) throw new Error("startICHRA requires groupId");
-  // payload:
-  // { ichra_affordability_calculation: { effective_date, plan_year?, rating_area_location } }
   return POST(`/groups/${encodeURIComponent(groupId)}/ichra_affordability_calculations`, payload);
 }
 
