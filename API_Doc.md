@@ -28,11 +28,18 @@ Fetch group details.
 Create a new ICHRA class (e.g., full-time, part-time).  
 Body:  
 ```json
-{ "name": "Full-Time", "contribution_employee": 400, "contribution_dependents": 200 }
+{ "name": "Full-Time", "employee_contribution": 400, "dependent_contribution": 200 }
 ```
 
 **GET** `/groups/:groupId/classes`  
 List classes for a group.
+
+**PATCH** `/groups/:groupId/classes/:classId`  
+Update a class contribution.  
+Body (example):  
+```json
+{ "employee_contribution": 350 }
+```
 
 ---
 
@@ -41,17 +48,17 @@ List classes for a group.
 Add a new member to a group.  
 Body:  
 ```json
-{ "first_name": "Evan", "last_name": "Kim", "dob": "1991-06-20", "gender": "M", "zip_code": "97222", "ichra_class": "<classId>" }
+{ "first_name": "Evan", "last_name": "Kim", "date_of_birth": "1991-06-20", "gender": "M", "zip_code": "97222", "ichra_class": "<classId>" }
 ```
 
 **GET** `/groups/:groupId/members`  
 List members of a group.
 
 **PATCH** `/groups/:groupId/members/:memberId`  
-Update a member (zip, income, class, etc).  
+Update a member (zip, income, contributions, class, etc).  
 Body (example):  
 ```json
-{ "zip_code": "97222", "household_income": 65000, "household_size": 3 }
+{ "old_employer_contribution": 350, "old_employee_contribution": 100, "agi": 38000, "household_size": 3 }
 ```
 
 ---
@@ -106,6 +113,34 @@ Returns the benchmark (SLCSP) for a specific member, scoped by county, age (from
   "effective_date": "YYYY-MM-DD (optional, defaults today)",
   "tobacco": false
 }
+```
+
+---
+
+## Employer Summary
+**GET** `/groups/:groupId/summary/employer`  
+Returns total employer costs under the old plan vs new ICHRA plan, and monthly/annual savings.
+
+---
+
+## Employee Summary
+**GET** `/groups/:groupId/summary/employees`  
+**POST** `/groups/:groupId/summary/employees`  
+
+Returns per-employee comparison:
+- Old out-of-pocket cost  
+- New out-of-pocket cost (after ICHRA allowance)  
+- Potential monthly and annual savings  
+
+Optional POST body supports filters and explicit plan selections:  
+```json
+{
+  "selected": { "<memberId>": "<planId>" },
+  "filters": { "carrier": "Providence", "level": "silver", "on_market": true }
+}
+```
+
+---
 
 ## Data Imports (CSV → Mongo)
 Run scripts from `/scripts` to load reference data:  
