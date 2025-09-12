@@ -15,6 +15,7 @@ ichra-quoting-tool/
 ├── seed.sh           # One-shot DB seeder (canonical order)
 ├── .env              # (optional) root env; read by seed.sh
 ├── package.json      # Root meta + workspace helpers
+├── Videos    # Videos for Explanation of Code Architecture
 └── README.md
 ```
 
@@ -37,6 +38,8 @@ Both the backend (`server/`) and frontend (`client/`) come with `.env.example` f
 Everything should work once the correct values are in place.
 
 ---
+
+## For the Code Explanation its in the Video folder with both videos for explanation
 
 
 
