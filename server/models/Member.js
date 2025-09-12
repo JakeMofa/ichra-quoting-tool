@@ -45,9 +45,9 @@ const memberSchema = new mongoose.Schema(
 
     //  MAGI inputs (annual $)
     agi: { type: Number, default: 0 },                        // Adjusted Gross Income
-    nontaxable_social_security: { type: Number, default: 0 }, // add-back
-    tax_exempt_interest: { type: Number, default: 0 },        // add-back
-    foreign_earned_income: { type: Number, default: 0 },      // add-back
+    nontaxable_social_security: { type: Number, default: 0 }, // 
+    tax_exempt_interest: { type: Number, default: 0 },        // 
+    foreign_earned_income: { type: Number, default: 0 },      // 
     tax_year: { type: Number },                                // helps pick FPL/applicable % later
 
     // Dependents

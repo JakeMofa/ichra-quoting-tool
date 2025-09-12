@@ -1,0 +1,140 @@
+:root { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial; }
+* { box-sizing: border-box; }
+body { margin: 0; background: #0b0d12; color: #e8eefc; }
+.wrap { max-width: 900px; margin: 24px auto; padding: 0 16px; }
+
+.card { background: #121624; border:1px solid #1e2537; border-radius: 12px; padding: 16px; margin: 16px 0; }
+.row { display:flex; gap:8px; align-items:center; }
+
+
+.input {
+  padding: 8px 10px;
+  border-radius: 8px;
+  border:1px solid #26304a;
+  background:#0f1320;
+  color:#e8eefc;
+  width: 100%;
+}
+
+button { padding: 8px 12px; border-radius: 10px; border:1px solid #2a3552; background:#1a2033; color:#e8eefc; cursor:pointer; }
+button:disabled { opacity: .5; cursor: not-allowed; }
+button:hover:not(:disabled) { background:#202744; }
+.muted { color:#8aa1cf; }
+
+.chip { transition: filter .12s ease; cursor: pointer; }
+.chip:hover { filter: brightness(1.15); }
+.chip-on { background: #2a4b8d; color: #fff; }
+.chip-active { background: #334155; color: #cbd5e1; }
+.chip-muted { background: #1f2937; color: #94a3b8; }
+
+.stepper { display:flex; gap:10px; flex-wrap:wrap; margin-bottom: 8px; }
+.step { border:1px solid #2b3654; background:#11162a; color:#cfe1ff; border-radius:999px; padding:6px 12px; text-decoration:none; }
+.step-on { border-color:#3b82f6; background:#152244; }
+.step-index { display:inline-block; min-width:18px; text-align:center; margin-right:6px; }
+
+/* modal */
+.modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+.modal { background: #121624; border: 1px solid #1e2537; border-radius: 12px; padding: 16px; width: min(560px, 92vw); }
+
+/* ===== Tables / EmployerCard ===== */
+.cards { display: grid; gap: 16px; }
+
+.label { font-size: 14px; font-weight: 600; margin-bottom: 4px; color: #d1d5db; }
+
+.table { display: grid; gap: 6px; }
+.thead, .trow { display: grid; align-items: center; gap: 10px; }
+.thead { font-size: 12px; color: #9ca3af; padding-bottom: 4px; border-bottom: 1px solid #1f2937; }
+.trow  { font-size: 14px; color: #e5e7eb; padding: 6px 0; border-bottom: 1px dashed #374151; }
+
+.pos { color: #34d399; }
+.neg { color: #f87171; }
+
+/* EmployeeTable polish */
+.table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.plan-cell .plan-title { font-weight: 600; line-height: 1.2; }
+.plan-cell .plan-meta { font-size: 12px; color: var(--muted, #9aa3b2); opacity: 0.9; margin-top: 2px; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; line-height: 1.2; background: rgba(148,163,184,0.15); border: 1px solid rgba(148,163,184,0.25); color: #d1d5db; }
+.emp-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.table .trow { align-items: center; }
+
+/* ===== Responsive form grids for Create-Class ===== */
+.form-grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+@media (max-width: 980px) {
+  .form-grid-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 680px) {
+  .form-grid-3 { grid-template-columns: 1fr; }
+}
+
+.form-grid-2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+@media (max-width: 680px) {
+  .form-grid-2 { grid-template-columns: 1fr; }
+}
+
+/* keep Existing classes table from spilling on small widths */
+.scroll-x { overflow-x: auto; }
+.minw-820 { min-width: 820px; }
+
+
+/* Wrap long inline code / CSV header text inside cards */
+.code-wrap {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #a8b3cf;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid #1f2937;
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-top: 6px;
+  white-space: pre-wrap;      /* allow wrapping */
+  word-break: break-word;     /* break long tokens */
+  overflow-wrap: anywhere;    /* as a last resort */
+}
+
+
+/* --- helpers for long inline code (e.g., CSV header) --- */
+.code-wrap {
+  background: #0f1320;
+  border: 1px solid #26304a;
+  border-radius: 8px;
+  padding: 8px 10px;
+  white-space: pre-wrap;      /* allow wrapping */
+  word-break: break-all;      /* break long tokens */
+  overflow: hidden;           /* keep inside the card */
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  color: #cfe1ff;
+}
+
+/* make form/table inputs fill their grid cells nicely */
+.table .input, .form-grid-3 .input {
+  width: 100%;
+  min-width: 0; /* allow shrink inside grid cell */
+}
+
+/* grid utilities used on Members page */
+.form-grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+@media (max-width: 860px) {
+  .form-grid-3 { grid-template-columns: 1fr; }
+}
+
+/* client/src/styles.css or wherever you keep modal styles */
+.modal {
+  width: min(960px, calc(100vw - 64px));
+  max-height: 85vh;
+  overflow-y: auto;
+}

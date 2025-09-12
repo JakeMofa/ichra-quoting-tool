@@ -21,6 +21,7 @@ function parseBool(x) {
   if (typeof x === "boolean") return x;
   if (x == null || x === "") return null;
   const s = String(x).toLowerCase();
+  if (s === "any") return null; 
   if (["1", "true", "yes", "on"].includes(s)) return true;
   if (["0", "false", "no", "off"].includes(s)) return false;
   return null;
@@ -130,6 +131,7 @@ exports.employerSummary = async (req, res) => {
  */
 exports.employeeSummary = async (req, res) => {
   const { groupId } = req.params;
+  const debugEnabled = req.query.debug === "1" || req.body?.debug === true;
 
   // Accept filters from querystring and body; body wins if provided
   const queryFilters = {
@@ -203,7 +205,7 @@ exports.employeeSummary = async (req, res) => {
     // filter predicate with multi-select support
     function passFilters(q) {
       const d = q.plan_details || {};
-      // carrier (multi)
+      // carrier (multi)x
       if (filters.carrier && filters.carrier.length) {
         const carrier = String(d.carrier_name || "").toLowerCase();
         const allowed = filters.carrier.map((x) => String(x).toLowerCase());
@@ -259,6 +261,21 @@ exports.employeeSummary = async (req, res) => {
       totals.old_monthly += oldOOP;
       totals.new_monthly += newOOP;
       totals.monthly_savings += monthlySavings;
+      
+      const debugEnabled = req.query.debug === "1" || req.body?.debug === true;
+      const filtered = allQuotes.filter(passFilters);
+      const pool = filtered.length ? filtered : allQuotes;
+      const chosenBy =
+        selPlanId && chosen ? "selected" :
+        (filtered.length ? "cheapest_filtered" : "cheapest_overall");
+      
+      const debugInfo = debugEnabled ? {
+        plans_total: allQuotes.length,
+        plans_passing_filters: filtered.length,
+        chosen_by: chosenBy,
+        chosen_adjusted_cost: chosen ? round2(chosen.adjusted_cost) : null,
+        allowance_used: round2(allowance)
+      } : undefined;      
 
       rows.push({
         member_id: mid,
@@ -278,6 +295,8 @@ exports.employeeSummary = async (req, res) => {
         new_out_of_pocket_monthly: round2(newOOP),
         monthly_savings: round2(monthlySavings),
         annual_savings: round2(monthlySavings * 12),
+        debug: debugInfo ?? null
+
       });
     }
 

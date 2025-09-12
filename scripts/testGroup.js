@@ -8,7 +8,7 @@ async function runTest() {
 
   try {
     const group = new Group({
-      company_name: "Test Employer Inc.",  // ✅ FIXED
+      company_name: "Test Employer Inc.",  // 
       ein: "12-3456789",
       contact_name: "Jane Doe",
       contact_email: "jane.doe@testemployer.com",

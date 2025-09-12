@@ -45,7 +45,7 @@ function applicablePct(fplPercent) {
 }
 
 function lerp(x, x0, x1, y0, y1) {
-  const t = (x - x0) / (x1 - x1);
+  const t = (x - x0) / (x1 - x0);
   return y0 + t * (y1 - y0);
 }
 

@@ -10,7 +10,7 @@
 // server/controllers/quoteController.js
 const Group = require("../models/Group");
 const Member = require("../models/Member");
-// If you still store affordability snapshots, re-enable and use it where you persist:
+
 // const AffordabilityResult = require("../models/AffordabilityResult");
 const { ensureIdeonAffordability } = require("../controllers/affordabilityHelpers.js");
 const Pricing = require("../models/Pricing");
@@ -159,7 +159,7 @@ async function computeBenchmarkSilver({ countyId, age, tobacco }) {
     return { error: `No on-market Silver plans in county_id ${county_id}` };
   }
 
-  // 3) Pricing for this age+tobacco across those silver plans
+  // 3) Pricing   age+tobacco across those silver plans
   const silverIds = silverPlans.map((p) => p.plan_id);
   const pricingRows = await Pricing.find({
     plan_id: { $in: silverIds },
@@ -216,7 +216,7 @@ async function computeBenchmarkSilver({ countyId, age, tobacco }) {
 // Generates a batch of quotes for ALL members in the group (on-market subsidy applied; off-market full price)
 exports.generateQuotes = async (req, res) => {
   const { groupId } = req.params;
-  const { effective_date, tobacco } = req.body || {}; // optional overrides for the run
+  const { effective_date, tobacco, rating_area_location } = req.body || {}; // include rating_area_location
   console.log(">>> Inside generateQuotes for group:", groupId);
 
   try {
@@ -225,6 +225,9 @@ exports.generateQuotes = async (req, res) => {
 
     const members = await Member.find({ group: groupId });
     if (!members.length) return res.status(404).json({ error: "No members found in group" });
+
+    // Normalize rating_area_location for Ideon (string "work"/"home" or object). Default "work".
+    const ratingLoc = (typeof rating_area_location !== "undefined") ? rating_area_location : "work";
 
     const batchQuotes = [];
 
@@ -370,9 +373,8 @@ exports.generateQuotes = async (req, res) => {
         ichra = await ensureIdeonAffordability({
           group,
           member,
-          effective_date:
-            req.body?.effective_date || new Date().toISOString().slice(0, 10), // 'YYYY-MM-DD'
-          county_id: String(countyId),
+          effective_date: req.body?.effective_date || new Date().toISOString().slice(0, 10), // 'YYYY-MM-DD'
+          rating_area_location: ratingLoc, //  pass along to the helper
         });
       } catch (e) {
         console.warn(
@@ -382,39 +384,63 @@ exports.generateQuotes = async (req, res) => {
       }
 
       // --- Compute subsidy: prefer Ideon PTC; else fall back to internal SLCSP/FPL math
-      let subsidyMonthly = 0;
-      try {
-        if (ichra && Number.isFinite(Number(ichra.premium_tax_credit))) {
-          subsidyMonthly = Number(ichra.premium_tax_credit);
-        } else {
-          const bench = await computeBenchmarkSilver({
-            countyId: countyId,
-            age,
-            tobacco: isTobacco,
-          });
+      // Prefer Ideon PTC; otherwise bench - expected. Expose %FPL & expected in response.
+       let subsidyMonthly = 0;
+       let benchPlanId = ichra?.benchmark_plan_id ?? null;
+       let benchPremium = Number(ichra?.benchmark_premium ?? NaN);
+       let fplAnnual = null;
+       let fplPercent = null;
+       let expectedMonthly = null;
+ 
+       // MAGI block (used even if Ideon returns PTC, so we can surface %FPL/expected)
+       const magi =
+         (member.agi ?? 0) +
+         (member.nontaxable_social_security ?? 0) +
+         (member.tax_exempt_interest ?? 0) +
+         (member.foreign_earned_income ?? 0);
+       const taxYear = member.tax_year || 2025;
+       const stateCode = (member.state_code || "").toUpperCase(); // 'AK'|'HI'|'' => 48/DC
+       try {
+         fplAnnual = getFpl(taxYear, member.household_size || 1, stateCode);
+         fplPercent = fplAnnual > 0 ? (magi / fplAnnual) * 100 : 0;
+         expectedMonthly = expectedContributionMonthly(magi, fplPercent);
+       } catch {
+         // leave as nulls if FPL table not available
+       }
+ 
+       // Ensure  have a benchmark; if Ideon didn’t give one, use internal SLCSP
+       if (!Number.isFinite(benchPremium) || !benchPlanId) {
+         const bench = await computeBenchmarkSilver({
+           countyId: countyId,
+           age,
+           tobacco: isTobacco,
+         });
+         if (!bench.error) {
+           benchPlanId = bench.benchmark_plan_id;
+           benchPremium = Number(bench.benchmark_premium);
+         }
+       }
+ 
+       // Subsidy
+       if (ichra && Number.isFinite(Number(ichra.premium_tax_credit))) {
+         subsidyMonthly = Number(ichra.premium_tax_credit);
+       } else if (Number.isFinite(benchPremium) && Number.isFinite(expectedMonthly ?? NaN)) {
+         subsidyMonthly = Math.max(0, benchPremium - expectedMonthly);
+       } else {
+         subsidyMonthly = 0;
+       }
 
-          if (!bench.error) {
-            const magi =
-              (member.agi ?? 0) +
-              (member.nontaxable_social_security ?? 0) +
-              (member.tax_exempt_interest ?? 0) +
-              (member.foreign_earned_income ?? 0);
-
-            const taxYear = member.tax_year || 2025;
-            const stateCode = (member.state_code || "").toUpperCase(); // 'AK'|'HI'|'' => 48/DC
-            const fpl = getFpl(taxYear, member.household_size || 1, stateCode);
-            const fplPct = fpl > 0 ? (magi / fpl) * 100 : 0;
-            const expected = expectedContributionMonthly(magi, fplPct);
-
-            subsidyMonthly = Math.max(
-              0,
-              Number(bench.benchmark_premium) - expected
+       // --- Derive affordable if helper didn't provide it
+       const shi = member.safe_harbor_income;
+        const affordableVal =
+        (typeof ichra?.affordable === "boolean")
+          ? ichra.affordable
+          : (
+              Number.isFinite(Number(ichra?.minimum_employer_contribution)) &&
+              Number.isFinite(Number((shi)))
+                ? Number(ichra.minimum_employer_contribution) <= Number(shi)
+                : null
             );
-          }
-        }
-      } catch (e) {
-        subsidyMonthly = 0; // fail-safe: no subsidy
-      }
 
       // --- Apply subsidy ONLY to ON-MARKET plans; off-market stays full price
       const quotes = plans
@@ -426,8 +452,8 @@ exports.generateQuotes = async (req, res) => {
             plan_id: pl.plan_id,
             premium,
             adjusted_cost: Math.round(net * 100) / 100,
-            benchmark_plan_id: ichra?.benchmark_plan_id ?? null,
-            benchmark_premium: ichra?.benchmark_premium ?? null,
+            benchmark_plan_id: benchPlanId ?? null,
+            benchmark_premium: Number.isFinite(benchPremium) ? benchPremium : null,
             plan_details: pl,
           };
         })
@@ -436,16 +462,20 @@ exports.generateQuotes = async (req, res) => {
       // --- Push one member’s bundle into the batch
       batchQuotes.push({
         member: member._id,
-        affordability: ichra
-          ? {
-              fpl_percent: ichra.fpl_percent ?? null,
-              expected_contribution: ichra.expected_contribution ?? null,
-              benchmark_plan_id: ichra.benchmark_plan_id ?? null,
-              benchmark_premium: ichra.benchmark_premium ?? null,
-              premium_tax_credit: ichra.premium_tax_credit ?? null,
-              affordable: ichra.affordable ?? null,
-            }
-          : null,
+        affordability: {
+          // Prefer Ideon values if provided; otherwise show our computed ones
+          fpl_percent:
+            (ichra?.fpl_percent ?? null) ??
+            (fplPercent == null ? null : Math.round(fplPercent)),
+          expected_contribution:
+            (ichra?.expected_contribution ?? null) ??
+            (expectedMonthly == null ? null : Math.round(expectedMonthly * 100) / 100),
+          benchmark_plan_id: benchPlanId ?? ichra?.benchmark_plan_id ?? null,
+          benchmark_premium:
+            Number.isFinite(benchPremium) ? benchPremium : (ichra?.benchmark_premium ?? null),
+          premium_tax_credit: ichra?.premium_tax_credit ?? subsidyMonthly ?? null,
+          affordable: affordableVal, //edit this to show in api call
+        },
         meta: {
           zip_code: member.zip_code,
           county_id: countyId,
@@ -935,16 +965,16 @@ exports.employerSummary = async (req, res) => {
       },
       employer_comparison: {
         old: {
-          monthly_total: round2(oldMonthlyTotal),
-          annual_total: round2(oldAnnualTotal),
+          monthly_total: Math.round(oldMonthlyTotal * 100) / 100,
+          annual_total: Math.round(oldAnnualTotal * 100) / 100,
         },
         ichra: {
-          monthly_total: round2(newMonthlyTotal),
-          annual_total: round2(newAnnualTotal),
+          monthly_total: Math.round(newMonthlyTotal * 100) / 100,
+          annual_total: Math.round(newMonthlyTotal * 12 * 100) / 100,
         },
         savings: {
-          monthly: round2(monthlySavings),
-          annual: round2(annualSavings),
+          monthly: Math.round((oldMonthlyTotal - newMonthlyTotal) * 100) / 100,
+          annual: Math.round((oldAnnualTotal - newAnnualTotal) * 100) / 100,
         },
       },
       breakdown_by_class: Object.fromEntries(
@@ -953,8 +983,8 @@ exports.employerSummary = async (req, res) => {
           {
             name: v.name,
             members: v.count,
-            monthly_total: round2(v.monthlyTotal),
-            annual_total: round2(v.monthlyTotal * 12),
+            monthly_total: Math.round(v.monthlyTotal * 100) / 100,
+            annual_total: Math.round(v.monthlyTotal * 12 * 100) / 100,
           },
         ])
       ),
@@ -962,9 +992,5 @@ exports.employerSummary = async (req, res) => {
   } catch (err) {
     console.error(">>> employerSummary error:", err);
     return res.status(500).json({ error: "Failed to compute employer comparison" });
-  }
-
-  function round2(n) {
-    return Math.round((Number(n) || 0) * 100) / 100;
   }
 };

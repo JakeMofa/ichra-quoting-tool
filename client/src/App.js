@@ -1,26 +1,29 @@
-//client/src/app.js
-import logo from './logo.svg';
-import './App.css';
+// src/App.js
+//App routes & shell. Adds Groups landing, Classes, Quotes, Summary pages.
 
-function App() {
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import './styles/app.css';
+import GroupLanding from './pages/GroupLanding';
+import Quotes from './pages/Quotes';
+import Summary from './pages/Summary';
+import Classes from './pages/Classes';
+import Members from './pages/Members';          
+
+export default function App() {
   return (
-    <div className="App">
-      <header className="App-header">
-        <img src={logo} className="App-logo" alt="logo" />
-        <p>
-          Edit <code>src/App.js</code> and save to reload.
-        </p>
-        <a
-          className="App-link"
-          href="https://reactjs.org"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Learn React
-        </a>
-      </header>
-    </div>
+    <BrowserRouter>
+      <div className="wrap">
+        <Routes>
+          <Route path="/" element={<Navigate to="/groups" replace />} />
+          <Route path="/groups" element={<GroupLanding />} />
+          <Route path="/" element={<GroupLanding />} />
+          <Route path="/groups/:groupId/classes" element={<Classes />} />
+          <Route path="/groups/:groupId/members" element={<Members />} />
+          <Route path="/groups/:groupId/quotes" element={<Quotes />} />
+          <Route path="/groups/:groupId/summary" element={<Summary />} />
+          <Route path="*" element={<div className="card">Not Found</div>} />
+        </Routes>
+      </div>
+    </BrowserRouter>
   );
 }
-
-export default App;

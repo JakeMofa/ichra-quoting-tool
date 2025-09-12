@@ -7,9 +7,9 @@ const cors = require("cors");
 // Routes
 const groupRoutes = require("./routes/groups"); 
 const classRoutes = require("./routes/classes"); 
-const memberRoutes = require("./routes/members");   // NEW
+const memberRoutes = require("./routes/members");   // N
 const ichraRoutes = require("./routes/ichra"); 
-const quoteRoutes = require("./routes/quote");     // NEW
+const quoteRoutes = require("./routes/quote");     //
 
 // Register models that need to be loaded on startup
 require("./models/ICHRAClass");

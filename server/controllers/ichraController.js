@@ -189,6 +189,9 @@ exports.calculateICHRA = async (req, res) => {
       });
       await resultDoc.save();
 
+      //reread from mongo to ensure we return the  finalized values
+      const saved = await AffordabilityResult.findById(resultDoc._id).lean();
+
       console.log(">>> Affordability results saved:", resultDoc._id);
       return res.status(201).json({ message: "ICHRA calculated", result: resultDoc });
 
@@ -211,6 +214,10 @@ exports.calculateICHRA = async (req, res) => {
         raw_response: { mock: true },
       });
       await resultDoc.save();
+
+      //Re-read same thing  for ichra
+      const saved = await AffordabilityResult.findById(resultDoc._id).lean();
+
 
       console.log(">>> Affordability results saved (mock):", resultDoc._id);
       return res.status(201).json({ message: "ICHRA calculated", result: resultDoc });

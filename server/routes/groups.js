@@ -16,4 +16,6 @@ router.get("/:groupId", groupController.getGroupById);
 const memberRoutes = require("./members");
 router.use("/:groupId/members", memberRoutes);
 
+// DELETE /api/groups/:groupId[?mode=cascade&dry_run=true]
+router.delete("/:groupId", groupController.deleteGroup);
 module.exports = router;

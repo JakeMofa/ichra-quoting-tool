@@ -141,6 +141,26 @@ Optional POST body supports filters and explicit plan selections:
 ```
 
 ---
+---
+
+## Employee Filters (facets for interactive filtering)
+**GET** `/groups/:groupId/summary/employees/filters`  
+Returns available facet values drawn from the latest quotes for the group.
+
+**Response Example**
+```json
+{
+  "carriers": [
+    "BridgeSpan Health Company",
+    "Kaiser Permanente",
+    "Moda Health",
+    "PacificSource Health Plans",
+    "Providence Health Plan",
+    "Regence BlueCross BlueShield"
+  ],
+  "levels": ["bronze", "expanded_bronze", "gold", "silver"],
+  "market": [true, false]
+}
 
 ## Data Imports (CSV → Mongo)
 Run scripts from `/scripts` to load reference data:  

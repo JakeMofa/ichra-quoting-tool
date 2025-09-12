@@ -1,6 +1,11 @@
 // server/controllers/groupController.js
 const Group = require("../models/Group");
 const ideon = require("../services/ideon");
+const mongoose = require("mongoose");
+const AffordabilityResult = require("../models//AfforadabilityResult");
+const Member = require("../models/Member");
+const ICHRAClass = require("../models/ICHRAClass");
+// add others if referenced (e.g., Quotes, AffordabilityResult)
 const { v4: uuidv4 } = require("uuid");
 
 // --- helper: trim group doc for responses ---
@@ -140,9 +145,93 @@ exports.getGroupById = async (req, res) => {
 exports.listGroups = async (req, res) => {
   try {
     const groups = await Group.find().populate("classes");
-    return res.json(groups.map(transformGroupDoc));
+    return res.json(
+      groups.map(g => ({
+        _id: g._id,
+        name: g.company_name || g.name || g.legal_name || null,
+        company_name: g.company_name ?? null,
+        createdAt: g.createdAt,
+        classes: Array.isArray(g.classes)
+          ? g.classes.map(c => ({ _id: c._id, name: c.name, subclass: c.subclass }))
+          : [],
+      }))
+    );
   } catch (err) {
     console.error(">>> Error listing groups:", err.message);
     return res.status(500).json({ error: "Failed to list groups" });
+  }
+};
+
+// DELETE /api/groups/:groupId?mode=cascade&dry_run=true
+exports.deleteGroup = async (req, res) => {
+  try {
+    const { groupId } = req.params;
+    const mode = (req.query.mode || "single").toLowerCase(); // "single" or "cascade"
+    const dryRun = String(req.query.dry_run || "false").toLowerCase() === "true";
+
+    if (!mongoose.Types.ObjectId.isValid(groupId)) {
+      return res.status(400).json({ error: "Invalid groupId" });
+    }
+
+    const group = await Group.findById(groupId);
+    if (!group) return res.status(404).json({ error: "Group not found" });
+
+    // counts for impact
+    const [memberCount, classCount, affCount] = await Promise.all([
+      Member.countDocuments({ group: groupId }),
+      ICHRAClass.countDocuments({ group: groupId }),
+      AffordabilityResult ? AffordabilityResult.countDocuments({ group: groupId }) : 0,
+    ]);
+
+    const impact = {
+      group: { _id: String(group._id), name: group.company_name ?? group.name ?? null },
+      will_delete: {
+        members: memberCount,
+        classes: classCount,
+        affordability_results: affCount,
+        dependents: "embedded within members (auto-removed)",
+      },
+    };
+
+    // block shallow delete if children exist
+    if (mode !== "cascade" && (memberCount || classCount || affCount)) {
+      return res.status(409).json({
+        error: "Group has related data. Use cascade mode to remove everything.",
+        hint: `DELETE /api/groups/${groupId}?mode=cascade`,
+        impact,
+      });
+    }
+
+    // dry run = preview only
+    if (dryRun) {
+      return res.json({
+        message: "Dry run only — nothing deleted.",
+        mode,
+        impact,
+      });
+    }
+
+    // ---- ACTUAL DELETE (no sessions/transactions) ----
+    if (mode === "cascade") {
+      await Promise.all([
+        Member.deleteMany({ group: groupId }),          // dependents embedded
+        ICHRAClass.deleteMany({ group: groupId }),
+        AffordabilityResult ? AffordabilityResult.deleteMany({ group: groupId }) : Promise.resolve(),
+      ]);
+    }
+    await Group.deleteOne({ _id: groupId });
+
+    return res.json({
+      message: mode === "cascade" ? "Group and all related data deleted." : "Group deleted.",
+      deleted: {
+        group_id: String(groupId),
+        members: mode === "cascade" ? memberCount : 0,
+        classes: mode === "cascade" ? classCount : 0,
+        affordability_results: mode === "cascade" ? affCount : 0,
+      },
+    });
+  } catch (err) {
+    console.error(">>> Error deleting group:", err);
+    return res.status(500).json({ error: "Failed to delete group", details: err.message });
   }
 };
