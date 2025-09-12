@@ -1,11 +1,12 @@
 // src/pages/Summary.jsx
-//  Summary page with Employer totals, filters, and Employee comparison table.
-// Render <EmployeeTable /> with a Class column by 
-//               GET /groups/:groupId/members and GET /groups/:groupId/classes.
+// Summary page with Employer totals, filters, and Employee comparison table.
+// Renders <EmployeeTable /> with a Class column by reading
+//   GET /groups/:groupId/members and GET /groups/:groupId/classes.
 
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { api } from '../api';
+import Stepper from '../components/Stepper';
 import EmployerCard from '../components/EmployerCard';
 import EmployeeTable from '../components/EmployeeTable';
 
@@ -35,9 +36,8 @@ export default function Summary() {
   // class enrichment
   const [classNameById, setClassNameById] = useState({});   // { classId: "Full-time" }
   const [classByMember, setClassByMember] = useState({});    // { memberId: "Full-time" }
-  const [classMembers, setClassMembers] = useState({});      // { classId: ["Alice Lopez", ...] } for EmployerCard
+  const [classMembers, setClassMembers] = useState({});      // { classId: ["Alice Lopez", ...] }
 
-  // derived for UI chips
   const marketPick = useMemo(() => {
     if (filters.on_market === true) return 'on';
     if (filters.on_market === false) return 'off';
@@ -87,52 +87,50 @@ export default function Summary() {
     }
   }
 
-  // Load classes + members to build:
-  //  - classNameById (classId -> class name)
+  // Load classes + members for:
   //  - classByMember (memberId -> class name) for EmployeeTable
   //  - classMembers (classId -> [names]) for EmployerCard
-async function loadClassesAndMembers() {
+  async function loadClassesAndMembers() {
     try {
       const [classes, members] = await Promise.all([
-        api.listClasses(groupId),  // GET /groups/:groupId/classes
-        api.listMembers(groupId),  // GET /groups/:groupId/members
+        api.listClasses(groupId),
+        api.listMembers(groupId),
       ]);
-  
-      // classId -> className (string)
+
       const nameById = {};
       (classes || []).forEach(c => {
         if (c && c._id) nameById[c._id] = c.name || String(c._id);
       });
       setClassNameById(nameById);
-  
-      const byMember = {}; // memberId -> className (string)
-      const byClass  = {}; // classId (string) -> [member names]
-  
+
+      const byMember = {};
+      const byClass  = {};
+
       (members || []).forEach(m => {
         const memberId = m?._id;
         if (!memberId) return;
-  
-        const raw = m?.ichra_class; // could be string or object
+
+        const raw = m?.ichra_class; // string or object
         const classId =
           typeof raw === 'string' ? raw :
           (raw && typeof raw === 'object' ? raw._id : undefined);
-  
+
         if (!classId) return;
-  
-        // Prefer the populated name if provided on the object; else fall back to lookup map
+
         const className =
           (raw && typeof raw === 'object' && raw.name) ||
           nameById[classId] ||
           String(classId);
-  
-        byMember[memberId] = String(className); // ensure string
-  
+
+        byMember[memberId] = String(className);
+
         const displayName =
           `${m.first_name || ''} ${m.last_name || ''}`.trim() ||
           (memberId || '').slice(0, 6);
+
         (byClass[String(classId)] ||= []).push(displayName);
       });
-  
+
       setClassByMember(byMember);
       setClassMembers(byClass);
     } catch {
@@ -141,7 +139,6 @@ async function loadClassesAndMembers() {
       setClassMembers({});
     }
   }
-  
 
   // -------- effects ----------
   useEffect(() => {
@@ -163,7 +160,7 @@ async function loadClassesAndMembers() {
 
   // -------- handlers ----------
   function toggleCarrier(c) {
-    setFilters((prev) => {
+    setFilters(prev => {
       const has = prev.carrier.includes(c);
       const next = has ? prev.carrier.filter(x => x !== c) : [...prev.carrier, c];
       return { ...prev, carrier: next };
@@ -171,7 +168,7 @@ async function loadClassesAndMembers() {
   }
 
   function toggleLevel(lvl) {
-    setFilters((prev) => {
+    setFilters(prev => {
       const has = prev.level.includes(lvl);
       const next = has ? prev.level.filter(x => x !== lvl) : [...prev.level, lvl];
       return { ...prev, level: next };
@@ -179,36 +176,30 @@ async function loadClassesAndMembers() {
   }
 
   function setMarket(which) {
-    if (which === 'on') setFilters((p) => ({ ...p, on_market: true }));
-    else if (which === 'off') setFilters((p) => ({ ...p, on_market: false }));
-    else setFilters((p) => ({ ...p, on_market: undefined }));
+    if (which === 'on') setFilters(p => ({ ...p, on_market: true }));
+    else if (which === 'off') setFilters(p => ({ ...p, on_market: false }));
+    else setFilters(p => ({ ...p, on_market: undefined }));
   }
 
   function clearFilters() {
     setFilters({ carrier: [], level: [], on_market: undefined });
   }
 
-  // derive rows passed to EmployeeTable 
   const employeeRows = employees;
 
   // -------- render ----------
   return (
     <div className="card">
-      <div className="row" style={{ alignItems: 'center', marginBottom: 12 }}>
-        <div className="chips">
-          <span className="chip chip-muted">1</span>
-          <span className="chip chip-muted">Group</span>
-          <span className="chip chip-muted">2</span>
-          <span className="chip chip-muted">Quotes</span>
-          <span className="chip chip-active">3</span>
-          <span className="chip chip-active">Summary</span>
-        </div>
-        <Link to={`/groups/${groupId}/quotes`} className="link" style={{ marginLeft: 14 }}>
+      
+      <Stepper />
+
+      <div className="row" style={{ alignItems: 'center', gap: 12, marginBottom: 12 }}>
+        <h2 style={{ margin: 0 }}>Summary</h2>
+        <div style={{ flex: 1 }} />
+        <Link to={`/groups/${groupId}/quotes`} className="link">
           ← Back to Quotes
         </Link>
       </div>
-
-      <h2>Summary</h2>
 
       {/* Employer totals (with member names by class) */}
       <div className="card" style={{ opacity: empLoading ? 0.7 : 1 }}>
@@ -229,7 +220,7 @@ async function loadClassesAndMembers() {
         <div className="muted" style={{ marginTop: 6 }}>Carrier</div>
         <div className="chips" style={{ marginTop: 6 }}>
           {facets.carriers.length === 0 && <span className="muted">No carriers in latest quotes.</span>}
-          {facets.carriers.map((c) => (
+          {facets.carriers.map(c => (
             <button
               key={c}
               className={`chip ${filters.carrier.includes(c) ? 'chip-on' : ''}`}
@@ -245,7 +236,7 @@ async function loadClassesAndMembers() {
         <div className="muted" style={{ marginTop: 12 }}>Level</div>
         <div className="chips" style={{ marginTop: 6 }}>
           {facets.levels.length === 0 && <span className="muted">No levels in latest quotes.</span>}
-          {facets.levels.map((lvl) => (
+          {facets.levels.map(lvl => (
             <button
               key={lvl}
               className={`chip ${filters.level.includes(lvl) ? 'chip-on' : ''}`}

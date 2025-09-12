@@ -1,6 +1,5 @@
 // client/src/pages/Members.jsx
 //  Member onboarding (manual add & CSV upload), assign to class/sub-class,
-//          
 //
 // Endpoints used:
 //  - GET    /groups/:groupId/classes
@@ -25,6 +24,21 @@ function normalizeZip(raw) {
   const digits = (raw || '').replace(/\D+/g, '');
   const noLeadZeros = digits.replace(/^0+/, '');
   return noLeadZeros.slice(0, 5);
+}
+
+// Normalize DOB: accepts YYYY-MM-DD, MM/DD/YYYY, or MM-DD-YYYY → YYYY-MM-DD
+function normalizeDOB(raw) {
+  const s = (raw || '').trim();
+  if (!s) return '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const m = s.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
+  if (m) {
+    const mm = String(m[1]).padStart(2, '0');
+    const dd = String(m[2]).padStart(2, '0');
+    const yy = m[3];
+    return `${yy}-${mm}-${dd}`;
+  }
+  return s; // leave as-is if it doesn't match expected patterns
 }
 
 // Always return an id string from either an id or a populated object
@@ -65,7 +79,7 @@ function DependentsEditor({ groupId, memberId = null, value = [], onChange }) {
 
   async function handleSaveRow(i) {
     const d = deps[i];
-    if (!memberId || !d?._id) return; // 
+    if (!memberId || !d?._id) return; // new rows saved via parent "Save dependents"
     const patch = {
       first_name: d.first_name,
       last_name: d.last_name,
@@ -145,7 +159,7 @@ export default function Members() {
   // Manual form
   const [first, setFirst] = useState('');
   const [last, setLast] = useState('');
-  const [dob, setDob] = useState('');     // YYYY-MM-DD
+  const [dob, setDob] = useState('');     // YYYY-MM-DD (normalized on blur)
   const [gender, setGender] = useState('F');
   const [zip, setZip] = useState('');
   const [zipErr, setZipErr] = useState('');
@@ -190,6 +204,11 @@ export default function Members() {
   const [tobacco, setTobacco] = useState(false);
   const [preppingQuotes, setPreppingQuotes] = useState(false);
   const [preQuotesErr, setPreQuotesErr] = useState('');
+
+  // ICHRA button state
+  const [ichraRunning, setIchraRunning] = useState(false);
+  const [ichraComplete, setIchraComplete] = useState(false);
+  const [ichraErr, setIchraErr] = useState('');
 
   // prevent duplicate runQuotes calls in this mount
   const runQuotesRef = useRef(false);
@@ -277,8 +296,8 @@ export default function Members() {
     }
   }
 
-  // Basic CSV: header row with
-  // first_name,last_name,dob,gender,zip_code,household_size,household_income,safe_harbor_income,agi,tax_year,old_employer_contribution,old_employee_contribution,ichra_class,external_id
+  // Basic CSV: header row with (NO ichra_class here)
+  // first_name,last_name,dob,gender,zip_code,household_size,household_income,safe_harbor_income,agi,tax_year,old_employer_contribution,old_employee_contribution,external_id
   async function handleCSVFile(file) {
     setCsvErr('');
     if (!file) return;
@@ -297,6 +316,8 @@ export default function Members() {
       setUploading(true);
       for (let i = 0; i < rows.length; i++) {
         const r = rows[i];
+
+        // Normalize/validate ZIP
         const zip5 = normalizeZip(r.zip_code || r.zip || '');
         if (zip5.length !== 5) { skipped.push(i + 2); continue; } // +2 for header line
 
@@ -309,7 +330,7 @@ export default function Members() {
         await api.createMember(groupId, {
           first_name: r.first_name || r.first || '',
           last_name: r.last_name || r.last || '',
-          dob: r.dob || undefined,
+          dob: normalizeDOB(r.dob) || undefined,
           gender: r.gender || undefined,
           zip_code: zip5,
           household_size: hhSizeNum,
@@ -319,7 +340,7 @@ export default function Members() {
           tax_year: r.tax_year ? Number(r.tax_year) : undefined,
           old_employer_contribution: r.old_employer_contribution ? Number(r.old_employer_contribution) : 0,
           old_employee_contribution: r.old_employee_contribution ? Number(r.old_employee_contribution) : 0,
-          ichra_class: r.ichra_class || '',
+          // ichra_class intentionally omitted in CSV flow
           external_id: r.external_id || undefined,
           dependents: [],
         });
@@ -352,7 +373,7 @@ export default function Members() {
         (byExt[key] ||= []).push({
           first_name: r.first_name || '',
           last_name: r.last_name || '',
-          dob: r.dob || '',
+          dob: normalizeDOB(r.dob) || '',
           gender: r.gender || 'U',
           relationship: r.relationship || 'child',
           same_household: String(r.same_household).toLowerCase() !== 'false',
@@ -398,46 +419,43 @@ export default function Members() {
     setDepsBuffer(Array.isArray(member.dependents) ? member.dependents.map(d => ({ ...d })) : []);
   }
 
+  // --- Run ICHRA for each member (client-side loop) ---
+  async function handleRunIchraAll() {
+    if (!groupId || !members.length) return;
+    setIchraErr('');
+    setIchraRunning(true);
+    setIchraComplete(false);
+    try {
+      for (const m of members) {
+        if (!m?._id) continue;
+        await api.runMemberIchra(groupId, m._id, {
+          effective_date: effDate,
+          rating_area_location: ratingLoc,
+        });
+      }
+      // refresh to pick up saved affordability fields
+      const mem = await api.listMembers(groupId);
+      setMembers(Array.isArray(mem) ? mem : []);
+      setIchraComplete(true);
+    } catch (e) {
+      setIchraErr(e.message || 'Failed to run ICHRA.');
+    } finally {
+      setIchraRunning(false);
+    }
+  }
+
   // --- Run quotes before navigating (idempotent & guarded) ---
+
   async function handleRunQuotesThenNav() {
     if (!groupId) return;
 
-    // Guards against rapid double-clicks / re-mount duplicates
     const inflightKey = `quotes_inflight:${groupId}`;
-    if (runQuotesRef.current || sessionStorage.getItem(inflightKey) === '1' || preppingQuotes) {
-      return;
-    }
-
     setPreQuotesErr('');
-    if (!effDate || !/^\d{4}-\d{2}-\d{2}$/.test(effDate)) {
-      setPreQuotesErr('Please provide a valid Effective Date (YYYY-MM-DD).');
-      return;
-    }
-    if (!['work','home'].includes(ratingLoc)) {
-      setPreQuotesErr('Please choose a rating area location (work or home).');
-      return;
-    }
-    try {
-      runQuotesRef.current = true;              // synchronous guard
-      sessionStorage.setItem(inflightKey, '1'); // cross-mount guard
-      setPreppingQuotes(true);
+    runQuotesRef.current = false;
+    sessionStorage.removeItem(inflightKey);
+    setPreppingQuotes(false);
 
-      await api.runQuotes(groupId, {
-        effective_date: effDate,
-        rating_area_location: ratingLoc,
-        tobacco,
-        idempotency_key: uuid(), // server can dedupe if needed
-      });
-
-      nav(`/groups/${groupId}/quotes`);
-    } catch (e) {
-      setPreQuotesErr(e.message || 'Failed to run quotes.');
-      // allow retry on error
-      runQuotesRef.current = false;
-      sessionStorage.removeItem(inflightKey);
-    } finally {
-      setPreppingQuotes(false);
-    }
+    nav(`/groups/${groupId}/quotes`);
   }
 
   return (
@@ -445,19 +463,33 @@ export default function Members() {
       {/* Stepper includes Members in the flow */}
       <Stepper />
 
-      <div className="row" style={{ alignItems: 'center', marginBottom: 12 }}>
+      <div className="row" style={{ alignItems: 'center', gap: 8, marginBottom: 12 }}>
         <h2 style={{ margin: 0 }}>Members</h2>
         <div style={{ flex: 1 }} />
+
+        {/* Calculate ICHRA button (top) */}
         <button
-          className="link"
-          onClick={handleRunQuotesThenNav}
-          disabled={preppingQuotes}
-          aria-busy={preppingQuotes ? 'true' : 'false'}
-          style={preppingQuotes ? { pointerEvents: 'none', opacity: 0.7 } : undefined}
+          className="chip"
+          onClick={handleRunIchraAll}
+          disabled={ichraRunning || !members.length}
+          aria-busy={ichraRunning ? 'true' : 'false'}
+          style={ichraRunning ? { pointerEvents: 'none', opacity: 0.7 } : undefined}
+          title={!members.length ? 'Add members first' : ''}
         >
-          {preppingQuotes ? 'Preparing Quotes…' : 'Go to Quotes →'}
+          {ichraRunning ? 'Calculating ICHRA…' : ichraComplete ? 'ICHRA complete ✓' : 'Calculate ICHRA'}
+        </button>
+
+        {/* Go to Quotes (gated until ICHRA done) */}
+        <button className="link" onClick={handleRunQuotesThenNav}>
+        Go to Quotes →
         </button>
       </div>
+
+      {ichraErr && (
+        <div className="card" style={{ marginBottom: 12, borderColor: '#7f1d1d', color: '#fecaca' }}>
+          {ichraErr}
+        </div>
+      )}
 
       {/* Quotes pre-flight controls */}
       <div className="card" style={{ marginBottom: 12 }}>
@@ -518,7 +550,13 @@ export default function Members() {
           <div className="row wrap" style={{ gap: 10 }}>
             <div className="col" style={{ minWidth: 220 }}>
               <label className="muted">DOB (YYYY-MM-DD)</label>
-              <input className="input" value={dob} onChange={e => setDob(e.target.value)} placeholder="1990-02-15" />
+              <input
+                className="input"
+                value={dob}
+                onChange={e => setDob(e.target.value)}
+                onBlur={e => setDob(normalizeDOB(e.target.value))}
+                placeholder="1990-02-15 or 02/15/1990"
+              />
             </div>
             <div className="col" style={{ minWidth: 220 }}>
               <label className="muted">Gender</label>
@@ -614,7 +652,7 @@ export default function Members() {
         <div className="label">Bulk upload (CSV)</div>
         <div className="code-wrap">
           Headers:
-{"\n"}first_name,last_name,dob,gender,zip_code,household_size,household_income,safe_harbor_income,agi,tax_year,old_employer_contribution,old_employee_contribution,ichra_class,external_id
+{"\n"}first_name,last_name,dob,gender,zip_code,household_size,household_income,safe_harbor_income,agi,tax_year,old_employer_contribution,old_employee_contribution,external_id
         </div>
         <div className="row" style={{ gap: 10, marginTop: 8 }}>
           <input type="file" accept=".csv,text/csv" onChange={(e) => handleCSVFile(e.target.files?.[0] || null)} disabled={uploading} />
@@ -641,88 +679,109 @@ export default function Members() {
         {err && <div className="card" style={{ borderColor: '#7f1d1d', color: '#fecaca' }}>{err}</div>}
         {!members.length && <div className="muted">No members yet.</div>}
         {!!members.length && (
-          <div className="table" style={{ gridTemplateColumns: '1.2fr 0.9fr 0.9fr 1.4fr 1fr 1fr 1.3fr 1.2fr' }}>
-            <div className="thead">
-              <div>Name</div>
-              <div>DOB</div>
-              <div>ZIP</div>
-              <div>Class</div>
-              <div>Old Emp (mo)</div>
-              <div>Old EE (mo)</div>
-              <div>Dependents</div>
-              <div></div>
-            </div>
+          // Make the table horizontally scrollable so it never overflows the card
+          <div style={{ overflowX: 'auto' }}>
+            <div
+              className="table"
+              style={{
+                gridTemplateColumns: '1.2fr 0.9fr 0.9fr 1.4fr 1fr 1fr 1.3fr 1.2fr',
+                minWidth: 1100,   // prevents squish and activates horizontal scroll when needed
+              }}
+            >
+              <div className="thead">
+                <div>Name</div>
+                <div>DOB</div>
+                <div>ZIP</div>
+                <div>Class</div>
+                <div>Old Emp (mo)</div>
+                <div>Old EE (mo)</div>
+                <div>Dependents</div>
+                <div></div>
+              </div>
 
-            {members.map(m => {
-              const full = `${m.first_name || ''} ${m.last_name || ''}`.trim() || '—';
-              const selectedClassId = classIdFrom(m.ichra_class); // normalize for select
-              return (
-                <div className="trow" key={m._id}>
-                  <div>{full}</div>
-                  <div>{(m.dob || '').slice(0,10) || '—'}</div>
-                  <div>{m.zip_code || '—'}</div>
-                  <div>
-                    <select
-                      className="input"
-                      value={selectedClassId}
-                      onChange={e =>
-                        setMembers(ms => ms.map(x => x._id === m._id ? { ...x, ichra_class: e.target.value } : x))
-                      }
-                    >
-                      <option value="">— select —</option>
-                      {classes.map(c => (
-                        <option key={c._id} value={c._id}>
-                          {c.name}{c.subclass ? ` — ${c.subclass}` : ''}
-                        </option>
-                      ))}
-                    </select>
+              {members.map(m => {
+                const full = `${m.first_name || ''} ${m.last_name || ''}`.trim() || '—';
+                const selectedClassId = classIdFrom(m.ichra_class); // normalize for select
+                return (
+                  <div className="trow" key={m._id}>
+                    <div>{full}</div>
+                    <div>{(m.dob || '').slice(0,10) || '—'}</div>
+                    <div>{m.zip_code || '—'}</div>
+                    <div>
+                      <select
+                        className="input"
+                        value={selectedClassId}
+                        onChange={e =>
+                          setMembers(ms => ms.map(x => x._id === m._id ? { ...x, ichra_class: e.target.value } : x))
+                        }
+                      >
+                        <option value="">— select —</option>
+                        {classes.map(c => (
+                          <option key={c._id} value={c._id}>
+                            {c.name}{c.subclass ? ` — ${c.subclass}` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <input
+                        className="input"
+                        value={m.old_employer_contribution ?? 0}
+                        onChange={e => setMembers(ms => ms.map(x => x._id === m._id ? { ...x, old_employer_contribution: e.target.value } : x))}
+                      />
+                    </div>
+                    <div>
+                      <input
+                        className="input"
+                        value={m.old_employee_contribution ?? 0}
+                        onChange={e => setMembers(ms => ms.map(x => x._id === m._id ? { ...x, old_employee_contribution: e.target.value } : x))}
+                      />
+                    </div>
+                    <div className="row" style={{ gap: 8 }}>
+                      <span className="chip chip-muted">Dependents: {Array.isArray(m.dependents) ? m.dependents.length : 0}</span>
+                      <button className="chip" type="button" onClick={() => openDepsEditor(m)}>Edit</button>
+                    </div>
+                    <div className="row" style={{ gap: 6, justifyContent: 'flex-end' }}>
+                      <button className="chip" onClick={() => saveRow(m)}>Save</button>
+                      <button className="chip" onClick={() => setEditMemberModal(m)}>Edit</button>
+                      <button className="chip" onClick={async () => {
+                        if (!window.confirm('Delete this member?')) return;
+                        await api.deleteMember(groupId, m._id);
+                        const mem = await api.listMembers(groupId);
+                        setMembers(Array.isArray(mem) ? mem : []);
+                      }}>Delete</button>
+                    </div>
                   </div>
-                  <div>
-                    <input
-                      className="input"
-                      value={m.old_employer_contribution ?? 0}
-                      onChange={e => setMembers(ms => ms.map(x => x._id === m._id ? { ...x, old_employer_contribution: e.target.value } : x))}
-                    />
-                  </div>
-                  <div>
-                    <input
-                      className="input"
-                      value={m.old_employee_contribution ?? 0}
-                      onChange={e => setMembers(ms => ms.map(x => x._id === m._id ? { ...x, old_employee_contribution: e.target.value } : x))}
-                    />
-                  </div>
-                  <div className="row" style={{ gap: 8 }}>
-                    <span className="chip chip-muted">Dependents: {Array.isArray(m.dependents) ? m.dependents.length : 0}</span>
-                    <button className="chip" type="button" onClick={() => openDepsEditor(m)}>Edit</button>
-                  </div>
-                  <div className="row" style={{ gap: 6, justifyContent: 'flex-end' }}>
-                    <button className="chip" onClick={() => saveRow(m)}>Save</button>
-                    <button className="chip" onClick={() => setEditMemberModal(m)}>Edit</button>
-                    <button className="chip" onClick={async () => {
-                      if (!window.confirm('Delete this member?')) return;
-                      await api.deleteMember(groupId, m._id);
-                      const mem = await api.listMembers(groupId);
-                      setMembers(Array.isArray(mem) ? mem : []);
-                    }}>Delete</button>
-                  </div>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
           </div>
         )}
       </div>
 
-      <div className="row" style={{ marginTop: 14 }}>
-        <button
-          className="chip"
-          onClick={handleRunQuotesThenNav}
-          disabled={preppingQuotes}
-          aria-busy={preppingQuotes ? 'true' : 'false'}
-          style={preppingQuotes ? { pointerEvents: 'none', opacity: 0.7 } : undefined}
-        >
-          {preppingQuotes ? 'Preparing Quotes…' : 'Continue to Quotes →'}
-        </button>
-      </div>
+      {/* comment */}
+      <div className="row" style={{ marginTop: 14, gap: 8, alignItems: 'center' }}>
+      {/* Calculate ICHRA button (bottom duplicate for convenience) */}
+      <button
+        className="chip"
+        onClick={handleRunIchraAll}
+        disabled={ichraRunning || !members.length}
+        aria-busy={ichraRunning ? 'true' : 'false'}
+        style={ichraRunning ? { pointerEvents: 'none', opacity: 0.7 } : undefined}
+        title={!members.length ? 'Add members first' : ''}
+      >
+        {ichraRunning ? 'Calculating ICHRA…' : ichraComplete ? 'ICHRA complete ✓' : 'Calculate ICHRA'}
+      </button>
+
+      {/* Go to Quotes */}
+      <button
+        className="chip"
+        onClick={handleRunQuotesThenNav}
+      >
+        Go to Quotes →
+      </button>
+    </div>
+      
 
       {/* Dependents modal */}
       {editingDeps && (
@@ -798,7 +857,8 @@ export default function Members() {
                 <input className="input"
                   value={(editMemberModal.dob || '').slice(0,10)}
                   onChange={e => setEditMemberModal({ ...editMemberModal, dob: e.target.value })}
-                  placeholder="YYYY-MM-DD"
+                  onBlur={e => setEditMemberModal({ ...editMemberModal, dob: normalizeDOB(e.target.value) })}
+                  placeholder="YYYY-MM-DD or MM/DD/YYYY"
                 />
               </div>
               <div className="col" style={{ minWidth: 220 }}>
@@ -865,7 +925,7 @@ export default function Members() {
                   first_name: (p.first_name || '').trim(),
                   last_name:  (p.last_name  || '').trim(),
                   external_id: p.external_id || undefined,
-                  dob: p.dob || undefined,
+                  dob: normalizeDOB(p.dob) || undefined,
                   gender: p.gender || undefined,
                   zip_code: p.zip_code || undefined,
                   household_size: Number(p.household_size) || undefined,

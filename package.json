@@ -11,5 +11,9 @@
   },
   "devDependencies": {
     "nock": "^14.0.10"
+  },
+  "engines": {
+    "node": ">=20.12.1",
+    "npm": ">=10"
   }
 }

@@ -1,11 +1,12 @@
 //  src/pages/GroupLanding.jsx
-//  After create, navigates straight to /groups/:groupId/quotes.
+//  After create, navigates straight to /groups/:groupId/classes.
 //  Also supports browsing all groups and deleting a group with a dry-run preview.
 //
 //  API used:
-//    - POST /groups                 (api.createGroup)
-//    - GET  /groups                 (api.listGroups)
-//    - DELETE /groups/:groupId      (api.deleteGroup with { mode, dry_run })
+//    - POST   /groups                 (api.createGroup)
+//    - GET    /groups                 (api.listGroups)
+//    - DELETE /groups/:groupId        (api.deleteGroup with { mode, dry_run })
+//    - GET    /groups/:groupId/members  <-- used here to validate an existing groupId
 //
 //  NOTE: Ensure your client API has:
 //    listGroups: () => request('GET', `/groups`)
@@ -23,6 +24,7 @@ export default function GroupLanding() {
   // Existing group path
   const [groupId, setGroupId] = useState('');
   const [goErr, setGoErr] = useState('');
+  const [goLoading, setGoLoading] = useState(false);
 
   // Create new group path
   const [companyName, setCompanyName] = useState('');
@@ -59,14 +61,38 @@ export default function GroupLanding() {
     catch { /* noop */ }
   }
 
+  // Validate a groupId exists by format + a lightweight fetch
+  async function validateGroupId(id) {
+    const trimmed = id.trim();
+    // must be a 24-char hex Mongo ObjectId
+    if (!/^[a-f\d]{24}$/i.test(trimmed)) {
+      setGoErr('That does not look like a valid Group ID (must be 24 hex characters).');
+      return false;
+    }
+    try {
+      setGoLoading(true);
+      setGoErr('');
+      // listMembers is cheap and 404s if group missing
+      await api.listMembers(trimmed);
+      return true;
+    } catch (e) {
+      setGoErr(e?.message ? `Group not found: ${e.message}` : 'Group not found.');
+      return false;
+    } finally {
+      setGoLoading(false);
+    }
+  }
+
   // --- existing group flow ---------------------------------------------------
-  function handleGo(defaultTab = 'quotes') {
+  async function handleGo(defaultTab = 'quotes') {
     setGoErr('');
     const id = groupId.trim();
     if (!id) {
       setGoErr('Please enter a Group ID.');
       return;
     }
+    const ok = await validateGroupId(id);
+    if (!ok) return;
     goTo(id, defaultTab);
   }
 
@@ -91,7 +117,8 @@ export default function GroupLanding() {
       const created = await api.createGroup(payload); // POST /groups
       const id = created?.group?._id || created?._id;
       if (!id) throw new Error('Create group succeeded but no _id returned.');
-      nav(`/groups/${id}/quotes`);
+      // After creating, send them to Classes first
+      nav(`/groups/${id}/classes`);
     } catch (err) {
       setCreateErr(err.message || 'Failed to create group');
     } finally {
@@ -193,16 +220,16 @@ export default function GroupLanding() {
             value={groupId}
             onChange={(e) => setGroupId(e.target.value)}
             style={{ minWidth: 360 }}
-            onKeyDown={(e) => { if (e.key === 'Enter') handleGo('quotes'); }}
+            onKeyDown={async (e) => { if (e.key === 'Enter') { e.preventDefault(); await handleGo('quotes'); } }}
           />
-          <button className="chip" onClick={() => handleGo('quotes')} disabled={!groupId.trim()}>
-            Open Quotes
+          <button className="chip" onClick={() => handleGo('quotes')} disabled={!groupId.trim() || goLoading}>
+            {goLoading ? 'Checking…' : 'Open Quotes'}
           </button>
-          <button className="chip" onClick={() => handleGo('members')} disabled={!groupId.trim()}>
-            Open Members
+          <button className="chip" onClick={() => handleGo('members')} disabled={!groupId.trim() || goLoading}>
+            {goLoading ? 'Checking…' : 'Open Members'}
           </button>
-          <button className="chip" onClick={() => handleGo('classes')} disabled={!groupId.trim()}>
-            Open Classes
+          <button className="chip" onClick={() => handleGo('classes')} disabled={!groupId.trim() || goLoading}>
+            {goLoading ? 'Checking…' : 'Open Classes'}
           </button>
         </div>
 

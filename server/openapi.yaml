@@ -1,0 +1,891 @@
+openapi: 3.1.0
+info:
+  title: ICHRA Quoting Tool API
+  version: 1.0.0
+  description: |
+    REST API for groups, classes, members (with dependents), ICHRA affordability, quoting, and summaries.
+servers:
+  - url: http://localhost:5050/api
+tags:
+  - name: Health
+  - name: Groups
+  - name: Classes
+  - name: Members
+  - name: Dependents
+  - name: Affordability
+  - name: Quotes
+  - name: Summary
+  - name: APTC
+
+paths:
+  /ping:
+    get:
+      tags: [Health]
+      summary: Health probe
+      responses:
+        '200':
+          description: pong
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string, example: pong }
+
+  /groups:
+    get:
+      tags: [Groups]
+      summary: List groups
+      responses:
+        '200':
+          description: Groups
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Group' }
+    post:
+      tags: [Groups]
+      summary: Create group
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GroupCreate' }
+      responses:
+        '200':
+          description: Group created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+                  group: { $ref: '#/components/schemas/Group' }
+
+  /groups/{groupId}:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+    get:
+      tags: [Groups]
+      summary: Get a group
+      responses:
+        '200':
+          description: Group
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Group' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Groups]
+      summary: Delete a group (shallow or cascade)
+      parameters:
+        - in: query
+          name: mode
+          schema: { type: string, enum: [shallow, cascade], default: shallow }
+        - in: query
+          name: dry_run
+          schema: { type: boolean, default: false }
+      responses:
+        '200':
+          description: Delete result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+                  impact:
+                    type: object
+                    additionalProperties: true
+                  deleted:
+                    type: object
+                    additionalProperties: true
+        '409':
+          description: Conflict (use cascade or dry-run preview)
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /groups/{groupId}/classes:
+    parameters: [ { $ref: '#/components/parameters/GroupId' } ]
+    get:
+      tags: [Classes]
+      summary: List classes for a group
+      responses:
+        '200':
+          description: Classes
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Class' }
+    post:
+      tags: [Classes]
+      summary: Create class or sub-class
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ClassCreate' }
+      responses:
+        '200':
+          description: Created class
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+                  class: { $ref: '#/components/schemas/Class' }
+
+  /groups/{groupId}/classes/{classId}:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+      - $ref: '#/components/parameters/ClassId'
+    patch:
+      tags: [Classes]
+      summary: Update class
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ClassPatch' }
+      responses:
+        '200':
+          description: Updated class
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+                  class: { $ref: '#/components/schemas/Class' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Classes]
+      summary: Delete class
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema: { type: object, properties: { message: { type: string } } }
+        '409':
+          description: Class in use
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /groups/{groupId}/members:
+    parameters: [ { $ref: '#/components/parameters/GroupId' } ]
+    get:
+      tags: [Members]
+      summary: List members
+      responses:
+        '200':
+          description: Members
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Member' }
+    post:
+      tags: [Members]
+      summary: Create member (dependents optional)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MemberCreate' }
+      responses:
+        '200':
+          description: Member created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+                  member: { $ref: '#/components/schemas/Member' }
+
+  /groups/{groupId}/members/{memberId}:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+      - $ref: '#/components/parameters/MemberId'
+    get:
+      tags: [Members]
+      summary: Get a member
+      responses:
+        '200':
+          description: Member
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Member' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Members]
+      summary: Update a member (partial; dependents array replaces)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MemberPatch' }
+      responses:
+        '200':
+          description: Updated member
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+                  member: { $ref: '#/components/schemas/Member' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Members]
+      summary: Delete a member
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema: { type: object, properties: { message: { type: string } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /groups/{groupId}/members/{memberId}/dependents/{dependentId}:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+      - $ref: '#/components/parameters/MemberId'
+      - $ref: '#/components/parameters/DependentId'
+    patch:
+      tags: [Dependents]
+      summary: Update a single dependent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DependentPatch' }
+      responses:
+        '200':
+          description: Updated dependent
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+                  dependent: { $ref: '#/components/schemas/Dependent' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Dependents]
+      summary: Delete a single dependent
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema: { type: object, properties: { message: { type: string } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /groups/{groupId}/members/{memberId}/ichra:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+      - $ref: '#/components/parameters/MemberId'
+    post:
+      tags: [Affordability]
+      summary: Calculate ICHRA affordability (persist result)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AffordabilityRequest' }
+      responses:
+        '200':
+          description: Affordability result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string, example: Calculated }
+                  result: { $ref: '#/components/schemas/AffordabilityResult' }
+    get:
+      tags: [Affordability]
+      summary: Get latest affordability result
+      responses:
+        '200':
+          description: Latest result
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AffordabilityResult' }
+
+  /groups/{groupId}/members/{memberId}/ichra/history:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+      - $ref: '#/components/parameters/MemberId'
+    get:
+      tags: [Affordability]
+      summary: Affordability history
+      responses:
+        '200':
+          description: History
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/AffordabilityResult' }
+
+  /groups/{groupId}/members/{memberId}/aptc/magi:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+      - $ref: '#/components/parameters/MemberId'
+    post:
+      tags: [APTC]
+      summary: Compute household MAGI (household or per-member inputs)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: '#/components/schemas/MAGIHouseholdRequest'
+                - $ref: '#/components/schemas/MAGIMembersRequest'
+      responses:
+        '200':
+          description: Normalized MAGI
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MAGIResponse' }
+
+  /groups/{groupId}/quotes:
+    parameters: [ { $ref: '#/components/parameters/GroupId' } ]
+    post:
+      tags: [Quotes]
+      summary: Generate batch quotes for all members
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/QuoteBatchRequest' }
+      responses:
+        '200':
+          description: Quotes created (or in progress)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string, example: Quotes generated }
+                  meta:
+                    type: object
+                    additionalProperties: true
+    get:
+      tags: [Quotes]
+      summary: Get latest quotes batch
+      responses:
+        '200':
+          description: Latest batch
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/QuoteBatch' }
+
+  /groups/{groupId}/quotes/history:
+    parameters: [ { $ref: '#/components/parameters/GroupId' } ]
+    get:
+      tags: [Quotes]
+      summary: All historical quote batches
+      responses:
+        '200':
+          description: History
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/QuoteBatch' }
+
+  /groups/{groupId}/quotes/preview:
+    parameters: [ { $ref: '#/components/parameters/GroupId' } ]
+    post:
+      tags: [Quotes]
+      summary: Preview quotes for a single member + county
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/QuotePreviewRequest' }
+      responses:
+        '200':
+          description: Preview quotes
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+
+  /groups/{groupId}/quotes/benchmark:
+    parameters: [ { $ref: '#/components/parameters/GroupId' } ]
+    post:
+      tags: [Quotes]
+      summary: Benchmark (SLCSP) for a member
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BenchmarkRequest' }
+      responses:
+        '200':
+          description: Benchmark result
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+
+  /groups/{groupId}/summary/employer:
+    parameters: [ { $ref: '#/components/parameters/GroupId' } ]
+    get:
+      tags: [Summary]
+      summary: Employer totals and class breakdown
+      responses:
+        '200':
+          description: Employer summary
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EmployerSummary' }
+
+  /groups/{groupId}/summary/employees:
+    parameters: [ { $ref: '#/components/parameters/GroupId' } ]
+    get:
+      tags: [Summary]
+      summary: Employee comparison (querystring filters)
+      parameters:
+        - in: query
+          name: carrier
+          schema: { type: string }
+        - in: query
+          name: level
+          schema: { type: string }
+        - in: query
+          name: on_market
+          schema: { type: boolean }
+      responses:
+        '200':
+          description: Employee summary rows
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EmployeeSummaryResponse' }
+    post:
+      tags: [Summary]
+      summary: Employee comparison (selections + filters)
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EmployeeSummaryRequest' }
+      responses:
+        '200':
+          description: Employee summary rows
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EmployeeSummaryResponse' }
+
+  /groups/{groupId}/summary/employees/filters:
+    parameters: [ { $ref: '#/components/parameters/GroupId' } ]
+    get:
+      tags: [Summary]
+      summary: Facets for filtering employees table
+      responses:
+        '200':
+          description: Facets
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Filters' }
+
+components:
+  parameters:
+    GroupId:
+      in: path
+      name: groupId
+      required: true
+      schema: { type: string, example: 68bbbe60fcdedc127bd3044e }
+    ClassId:
+      in: path
+      name: classId
+      required: true
+      schema: { type: string }
+    MemberId:
+      in: path
+      name: memberId
+      required: true
+      schema: { type: string }
+    DependentId:
+      in: path
+      name: dependentId
+      required: true
+      schema: { type: string }
+
+  responses:
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema: { type: object, properties: { error: { type: string } } }
+
+  schemas:
+    Group:
+      type: object
+      properties:
+        _id: { type: string }
+        company_name: { type: string }
+        contact_name: { type: string }
+        contact_email: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    GroupCreate:
+      type: object
+      required: [company_name, contact_name, contact_email]
+      properties:
+        company_name: { type: string }
+        contact_name: { type: string }
+        contact_email: { type: string }
+
+    Class:
+      type: object
+      properties:
+        _id: { type: string }
+        group_id: { type: string }
+        name: { type: string, example: Full-time }
+        subclass: { type: string, nullable: true, example: Age 30–39 }
+        parent_class: { type: string, nullable: true }
+        employee_contribution: { type: number }
+        dependent_contribution: { type: number }
+
+    ClassCreate:
+      allOf:
+        - $ref: '#/components/schemas/ClassPatch'
+      required: [name]
+      properties:
+        name: { type: string }
+
+    ClassPatch:
+      type: object
+      properties:
+        name: { type: string }
+        subclass: { type: string, nullable: true }
+        parent_class: { type: string, nullable: true }
+        employee_contribution: { type: number }
+        dependent_contribution: { type: number }
+        monthly_employer_contribution: { type: number, description: Alias used in examples }
+
+    Dependent:
+      type: object
+      properties:
+        _id: { type: string }
+        first_name: { type: string }
+        last_name: { type: string }
+        dob: { type: string, format: date }
+        gender: { type: string, enum: [M, F, U] }
+        relationship: { type: string, example: child }
+        same_household: { type: boolean }
+        last_used_tobacco:
+          oneOf:
+            - { type: string, format: date }
+            - { type: 'null' }
+
+    DependentPatch:
+      type: object
+      properties:
+        first_name: { type: string }
+        last_name: { type: string }
+        dob: { type: string, format: date }
+        gender: { type: string, enum: [M, F, U] }
+        relationship: { type: string }
+        same_household: { type: boolean }
+        last_used_tobacco:
+          oneOf:
+            - { type: string, format: date }
+            - { type: 'null' }
+
+    Member:
+      type: object
+      properties:
+        _id: { type: string }
+        first_name: { type: string }
+        last_name: { type: string }
+        dob: { type: string, format: date-time }
+        gender: { type: string, enum: [M, F, U] }
+        zip_code: { type: string }
+        fips_code: { type: string, nullable: true }
+        ichra_class: { type: string }
+        external_id: { type: string, nullable: true }
+        household_size: { type: integer, nullable: true }
+        household_income: { type: number, nullable: true }
+        safe_harbor_income: { type: number, nullable: true }
+        agi: { type: number, nullable: true }
+        tax_year: { type: integer, nullable: true }
+        old_employer_contribution: { type: number, nullable: true }
+        old_employee_contribution: { type: number, nullable: true }
+        dependents:
+          type: array
+          items: { $ref: '#/components/schemas/Dependent' }
+
+    MemberCreate:
+      allOf:
+        - $ref: '#/components/schemas/MemberPatch'
+      required: [first_name, last_name, zip_code]
+
+    MemberPatch:
+      type: object
+      properties:
+        first_name: { type: string }
+        last_name: { type: string }
+        dob: { type: string, format: date }
+        gender: { type: string, enum: [M, F, U] }
+        zip_code: { type: string }
+        ichra_class: { type: string }
+        external_id: { type: string }
+        household_size: { type: integer }
+        household_income: { type: number }
+        safe_harbor_income: { type: number }
+        agi: { type: number }
+        tax_year: { type: integer }
+        old_employer_contribution: { type: number }
+        old_employee_contribution: { type: number }
+        dependents:
+          type: array
+          description: Replaces entire array
+          items: { $ref: '#/components/schemas/Dependent' }
+
+    AffordabilityRequest:
+      type: object
+      properties:
+        effective_date: { type: string, format: date, example: '2025-01-01' }
+        rating_area_location: { type: string, enum: [home, work], example: work }
+
+    AffordabilityResult:
+      type: object
+      properties:
+        minimum_employer_contribution: { type: number }
+        fpl_minimum_employer_contribution: { type: number }
+        premium_tax_credit: { type: number }
+        benchmark_plan_id: { type: string }
+        benchmark_premium: { type: number }
+        affordable: { type: boolean }
+        fpl_percent: { type: number, nullable: true }
+        expected_contribution: { type: number, nullable: true }
+
+    MAGIHouseholdRequest:
+      type: object
+      required: [tax_year, household_size, agi]
+      properties:
+        tax_year: { type: integer, example: 2025 }
+        household_size: { type: integer, example: 3 }
+        agi: { type: number, example: 65000 }
+        add_backs:
+          type: object
+          properties:
+            nontaxable_social_security: { type: number, default: 0 }
+            tax_exempt_interest: { type: number, default: 0 }
+            foreign_earned_income_excluded: { type: number, default: 0 }
+
+    MAGIMembersRequest:
+      type: object
+      required: [tax_year, household_size, members]
+      properties:
+        tax_year: { type: integer, example: 2025 }
+        household_size: { type: integer, example: 3 }
+        members:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              files_return: { type: boolean }
+              wages: { type: number, default: 0 }
+              self_employment_income: { type: number, default: 0 }
+              unemployment_comp: { type: number, default: 0 }
+              alimony_taxable: { type: number, default: 0 }
+              capital_gains_taxable: { type: number, default: 0 }
+              other_taxable_income: { type: number, default: 0 }
+              adjustments: { type: number, default: 0 }
+        add_backs:
+          type: object
+          properties:
+            nontaxable_social_security: { type: number, default: 0 }
+            tax_exempt_interest: { type: number, default: 0 }
+            foreign_earned_income_excluded: { type: number, default: 0 }
+
+    MAGIResponse:
+      type: object
+      properties:
+        tax_year: { type: integer }
+        household_size: { type: integer }
+        agi: { type: number }
+        add_backs:
+          type: object
+          properties:
+            nontaxable_social_security: { type: number }
+            tax_exempt_interest: { type: number }
+            foreign_earned_income_excluded: { type: number }
+        magi: { type: number }
+        magi_rounded: { type: number }
+        members_summary:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string, nullable: true }
+              agi_component: { type: number }
+
+    QuoteBatchRequest:
+      type: object
+      properties:
+        effective_date: { type: string, format: date }
+        tobacco: { type: boolean }
+        rating_area_location: { type: string, enum: [home, work] }
+
+    QuotePreviewRequest:
+      type: object
+      required: [member_id, county_id]
+      properties:
+        member_id: { type: string }
+        county_id: { type: string }
+        effective_date: { type: string, format: date }
+        tobacco: { type: boolean }
+
+    BenchmarkRequest:
+      type: object
+      required: [member_id, county_id]
+      properties:
+        member_id: { type: string }
+        county_id: { type: string }
+        effective_date: { type: string, format: date }
+        tobacco: { type: boolean }
+
+    QuoteBatch:
+      type: object
+      properties:
+        _id: { type: string }
+        group_id: { type: string }
+        createdAt: { type: string, format: date-time }
+        quotes:
+          type: array
+          items:
+            type: object
+            properties:
+              member:
+                type: object
+                properties:
+                  _id: { type: string }
+                  first_name: { type: string }
+                  last_name: { type: string }
+                  date_of_birth: { type: string, format: date-time }
+                  zip_code: { type: string }
+              affordability: { $ref: '#/components/schemas/AffordabilityResult' }
+              quotes:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    plan_id: { type: string }
+                    premium: { type: number }
+                    adjusted_cost: { type: number }
+                    benchmark_plan_id: { type: string }
+                    benchmark_premium: { type: number }
+
+    EmployerSummary:
+      type: object
+      properties:
+        group:
+          type: object
+          properties:
+            _id: { type: string }
+            company_name: { type: string }
+        counts:
+          type: object
+          properties:
+            members: { type: integer }
+            classes: { type: integer }
+            members_with_class: { type: integer }
+        employer_comparison:
+          type: object
+          properties:
+            old:
+              type: object
+              properties:
+                monthly_total: { type: number }
+                annual_total: { type: number }
+            ichra:
+              type: object
+              properties:
+                monthly_total: { type: number }
+                annual_total: { type: number }
+            savings:
+              type: object
+              properties:
+                monthly: { type: number }
+                annual: { type: number }
+        breakdown_by_class:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              name: { type: string }
+              members: { type: integer }
+              monthly_total: { type: number }
+              annual_total: { type: number }
+
+    EmployeeSummaryRequest:
+      type: object
+      properties:
+        selected:
+          type: object
+          additionalProperties:
+            type: string
+            description: memberId -> planId
+        filters:
+          type: object
+          properties:
+            carrier: { type: string }
+            level: { type: string }
+            on_market: { type: boolean }
+
+    EmployeeSummaryResponse:
+      type: object
+      properties:
+        totals:
+          type: object
+          properties:
+            old_out_of_pocket_monthly: { type: number }
+            new_out_of_pocket_monthly: { type: number }
+            monthly_savings: { type: number }
+        employees:
+          type: array
+          items:
+            type: object
+            properties:
+              member_id: { type: string }
+              name: { type: string }
+              selected_plan_id: { type: string }
+              selected_plan:
+                type: object
+                properties:
+                  carrier_name: { type: string }
+                  display_name: { type: string }
+                  level: { type: string }
+                  on_market: { type: boolean }
+              allowance_monthly: { type: number }
+              old_out_of_pocket_monthly: { type: number }
+              new_out_of_pocket_monthly: { type: number }
+              monthly_savings: { type: number }
+              annual_savings: { type: number }
+
+    Filters:
+      type: object
+      properties:
+        carriers:
+          type: array
+          items: { type: string }
+        levels:
+          type: array
+          items: { type: string }
+        market:
+          type: array
+          items: { type: boolean }
