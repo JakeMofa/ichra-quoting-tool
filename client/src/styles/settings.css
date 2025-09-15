@@ -1,0 +1,83 @@
+/* client/src/styles/settings.css */
+.settings-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+  }
+  
+  .settings-modal {
+    background: #121624;
+    border: 1px solid #1e2537;
+    border-radius: 12px;
+    padding: 20px;
+    width: min(480px, 92vw);
+    color: #e5e7eb;
+  }
+  
+  .settings-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+  }
+  
+  .close-btn {
+    border: none;
+    background: transparent;
+    font-size: 20px;
+    cursor: pointer;
+    color: #9ca3af;
+  }
+  
+  .settings-body {
+    display: grid;
+    gap: 16px;
+  }
+  
+  .field label {
+    font-size: 14px;
+    color: #cbd5e1;
+    display: block;
+    margin-bottom: 6px;
+  }
+  
+  .field input {
+    width: 100%;
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 1px solid #26304a;
+    background: #0f1320;
+    color: #e5e7eb;
+  }
+  
+  .toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  
+  .settings-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 20px;
+  }
+  
+  .btn {
+    background: #1a2033;
+    border: 1px solid #2a3552;
+    color: #e5e7eb;
+    border-radius: 8px;
+    padding: 8px 14px;
+    cursor: pointer;
+  }
+  .btn-primary {
+    background: #2563eb;
+    border-color: #2563eb;
+  }

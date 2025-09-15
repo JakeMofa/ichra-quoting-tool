@@ -1,3 +1,4 @@
+/* src/styles/app.css */
 :root { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial; }
 * { box-sizing: border-box; }
 body { margin: 0; background: #0b0d12; color: #e8eefc; }
@@ -138,3 +139,5 @@ button:hover:not(:disabled) { background:#202744; }
   max-height: 85vh;
   overflow-y: auto;
 }
+
+

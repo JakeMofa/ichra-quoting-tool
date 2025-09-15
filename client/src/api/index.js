@@ -2,6 +2,8 @@
 // Thin, dependable wrappers around backend endpoints.
 // Uses fetch with a small timeout + consistent error handling.
 
+import { getAuthHeadersFromStorage } from './authHeaders';
+
 const BASE = (process.env.REACT_APP_API || 'http://localhost:5050/api').replace(/\/+$/, '');
 
 // --- low-level helpers -------------------------------------------------------
@@ -16,11 +18,13 @@ function withTimeout(ms, promise) {
 
 async function request(method, path, body) {
   const url = `${BASE}${path}`;
+  const authHeaders = getAuthHeadersFromStorage(); // <-- add mock/ideon headers here
+
   return withTimeout(20000, async (signal) => {
     const res = await fetch(url, {
       method,
       signal,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeaders }, // <-- merged
       body: body ? JSON.stringify(body) : undefined,
     });
     const text = await res.text();

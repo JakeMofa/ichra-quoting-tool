@@ -1,0 +1,164 @@
+/* client/src/styles/landing.css */
+
+/* Layout */
+.landing {
+    position: relative;
+    min-height: calc(100dvh - 60px);
+    display: grid;
+    place-items: start center;
+    padding-top: clamp(32px, 12vh, 160px);
+    overflow: hidden;
+  }
+  
+  .hero {
+    text-align: center;
+    width: min(960px, 92vw);
+    padding: 24px 16px 40px;
+    z-index: 2;
+    animation: fade-in 700ms ease-out 50ms both;
+  }
+  
+  /* Small “category” pill */
+  .pill {
+    display: inline-block;
+    font-size: 12px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: #93c5fd;
+    border: 1px solid #1f2937;
+    border-radius: 999px;
+    padding: 6px 10px;
+    margin-bottom: 12px;
+    background: rgba(37,99,235,0.08);
+    user-select: none;
+  }
+  
+  /* Title */
+  .title { margin: 0 0 8px 0; line-height: 1.1; }
+  .title-top {
+    display: block;
+    color: #9ca3af;
+    font-weight: 500;
+    font-size: clamp(18px, 2.4vw, 24px);
+    margin-bottom: 6px;
+    letter-spacing: .02em;
+    animation: slide-up 600ms ease-out both;
+  }
+  .title-main {
+    display: inline-block;
+    font-weight: 800;
+    font-size: clamp(34px, 6.2vw, 56px);
+    letter-spacing: .01em;
+    background: linear-gradient(90deg, #e5e7eb 0%, #93c5fd 45%, #e5e7eb 90%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    background-size: 200% 100%;
+    animation: sheen 4s linear infinite, slide-up 800ms ease-out 120ms both;
+    text-shadow: 0 10px 32px rgba(0,0,0,0.35);
+  }
+  
+  /* Copy + CTAs */
+  .lede { color: #bfc5d2; max-width: 760px; margin: 14px auto 22px; font-size: clamp(15px, 2vw, 18px); }
+  .ctaRow { display: flex; gap: 12px; justify-content: center; align-items: center; min-height: 44px; }
+  .btn {
+    text-decoration: none; border-radius: 10px; padding: 10px 14px;
+    border: 1px solid #374151; color: #e5e7eb; background: #0f172a;
+    transition: transform .12s ease, filter .12s ease, background .12s ease;
+  }
+  .btn:hover { transform: translateY(-1px); filter: brightness(1.05); }
+  .btn-primary { background: #2563eb; border-color: #2563eb; }
+  .btn-ghost { background: #0b1220; }
+  .muted { color: #9ca3af; }
+  
+  /* Animated stage behind the copy */
+  .stage {
+    position: absolute; inset: 0; display: grid; place-items: center;
+    pointer-events: none; z-index: 1;
+  }
+  
+  /* Aurora waves */
+  .wave {
+    position: absolute; width: 140vmax; height: 140vmax; border-radius: 45%;
+    opacity: .18; filter: blur(40px) saturate(120%);
+    background:
+      conic-gradient(from 0deg,
+        transparent 0 28%,
+        rgba(37,99,235,.55) 32% 40%,
+        transparent 44% 52%,
+        rgba(139,92,246,.55) 56% 64%,
+        transparent 68% 100%);
+    -webkit-mask: radial-gradient(closest-side, rgba(255,255,255,.8), transparent);
+            mask: radial-gradient(closest-side, rgba(255,255,255,.8), transparent);
+    animation: spin 28s linear infinite;
+  }
+  .wave-1 { animation-duration: 26s; transform: rotate(8deg); }
+  .wave-2 { animation-duration: 42s; transform: rotate(-12deg); opacity: .14; }
+  
+  /* --- ORB ANCHOR (shared placement) --- */
+  .orb-anchor { position: relative; margin-top: -10px; }
+  
+  /* --- CSS ORB (renamed from .orb) --- */
+  .css-orb {
+    position: absolute;
+    width: clamp(220px, 28vw, 340px);
+    height: clamp(220px, 28vw, 340px);
+    border-radius: 50%;
+    background:
+      radial-gradient(40% 40% at 45% 35%, rgba(255,255,255,.5), rgba(255,255,255,0) 60%),
+      radial-gradient(closest-side, rgba(37,99,235,.35), rgba(2,6,23,0) 70%),
+      radial-gradient(circle at 50% 60%, rgba(30,64,175,.65), rgba(2,6,23,0) 65%);
+    box-shadow:
+      0 0 0 1px rgba(59,130,246,.25) inset,
+      0 12px 30px rgba(2,6,23,.65),
+      0 0 60px rgba(59,130,246,.25);
+    animation: floatY 5.6s ease-in-out infinite;
+    bottom: 60px;
+  }
+  .css-orb::before {
+    content: ""; position: absolute; inset: -2px; border-radius: 50%;
+    background: radial-gradient(closest-side, rgba(255,255,255,.06), rgba(255,255,255,0) 70%);
+    border: 1px solid rgba(148,163,184,.18);
+    pointer-events: none;
+  }
+  
+  /* Cross mark for CSS orb */
+  .css-orb .plus, .css-orb .plus::before {
+    position: absolute; inset: 0; margin: auto; display: block;
+    width: 34%; height: 34%; filter: drop-shadow(0 0 24px rgba(59,130,246,.55));
+  }
+  .css-orb .plus::before, .css-orb .plus::after {
+    content: ""; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    background: linear-gradient(180deg, #e0edff, #93c5fd); border-radius: 6px;
+  }
+  .css-orb .plus::before { width: 22%; height: 70%; }
+  .css-orb .plus::after  { width: 70%; height: 22%; }
+  
+  /* --- Three.js orb wrapper (no CSS-orb visuals) --- */
+  .three-orb {
+    position: absolute;
+    width: clamp(220px, 28vw, 380px);
+    height: clamp(220px, 28vw, 380px);
+    border-radius: 50%;
+    overflow: hidden;
+    pointer-events: none;
+    bottom: 60px;
+    box-shadow:
+      0 0 0 1px rgba(59,130,246,.25) inset,
+      0 12px 30px rgba(2,6,23,.65),
+      0 0 60px rgba(59,130,246,.25);
+    background: radial-gradient(closest-side, rgba(12,22,46,.45), rgba(12,22,46,0) 70%);
+  }
+  
+  /* Animations */
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes floatY { 0%,100% { transform: translateY(-6px); } 50% { transform: translateY(10px); } }
+  @keyframes sheen { 0% { background-position: 200% 0; } 100% { background-position: 0% 0; } }
+  @keyframes fade-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes slide-up { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+  
+  /* Reduced motion */
+  @media (prefers-reduced-motion: reduce) {
+    .wave, .title-main { animation: none !important; }
+    .css-orb, .three-orb { animation: none !important; }
+  }

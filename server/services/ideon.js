@@ -11,8 +11,10 @@ const axios = require("axios");
 const Bottleneck = require("bottleneck");
 
 // --- Config ---
-const IDEON_API_KEY = process.env.IDEON_API_KEY || process.env.VERICRED_API_KEY || "";
-const IDEON_BASE_URL = process.env.IDEON_BASE_URL || "https://api.ideonapi.com";  
+const IDEON_API_KEY =
+  process.env.IDEON_API_KEY || process.env.VERICRED_API_KEY || "";
+const IDEON_BASE_URL =
+  process.env.IDEON_BASE_URL || "https://api.ideonapi.com";
 
 // Throttle / rate limit
 const MIN_DELAY_FALLBACK_MS = Number(process.env.IDEON_MIN_DELAY_MS || 700);
@@ -29,7 +31,8 @@ const limiter = new Bottleneck({
   minTime: Number(process.env.IDEON_RATE_MIN_TIME_MS || MIN_DELAY_FALLBACK_MS),
 });
 
-const IDEON_LOG = String(process.env.IDEON_LOG || "false").toLowerCase() === "true";
+const IDEON_LOG =
+  String(process.env.IDEON_LOG || "false").toLowerCase() === "true";
 
 // --- Axios instance ---
 const api = axios.create({
@@ -37,9 +40,9 @@ const api = axios.create({
   headers: {
     "Vericred-Api-Key": IDEON_API_KEY,
     "Ideon-Api-Key": IDEON_API_KEY,
-    "Authorization": `Bearer ${IDEON_API_KEY}`,
+    Authorization: `Bearer ${IDEON_API_KEY}`,
     "Content-Type": "application/json",
-    "Accept": "application/json",
+    Accept: "application/json",
     "Accept-Version": "v6", // pin version
   },
   timeout: 15000,
@@ -55,7 +58,9 @@ async function requestWithRetry(fn, retries = MAX_RETRIES, backoff = INITIAL_BAC
     if (retriable && retries > 0) {
       const retryAfter = err.response?.headers?.["retry-after"];
       const waitMs = retryAfter ? Number(retryAfter) * 1000 : backoff;
-      if (IDEON_LOG) console.warn(`[Ideon] HTTP ${status}. Retrying in ${waitMs}ms...`);
+      if (IDEON_LOG) {
+        console.warn(`[Ideon] HTTP ${status}. Retrying in ${waitMs}ms...`);
+      }
       await new Promise((r) => setTimeout(r, waitMs));
       return requestWithRetry(fn, retries - 1, Math.min(backoff * 2, 8000));
     }
@@ -98,7 +103,10 @@ async function addMember(groupId, memberData) {
 // 3) ICHRA affordability (NESTED under /groups/{id})
 async function startICHRA(groupId, payload) {
   if (!groupId) throw new Error("startICHRA requires groupId");
-  return POST(`/groups/${encodeURIComponent(groupId)}/ichra_affordability_calculations`, payload);
+  return POST(
+    `/groups/${encodeURIComponent(groupId)}/ichra_affordability_calculations`,
+    payload
+  );
 }
 
 // 4) Poll ICHRA calc status
@@ -110,7 +118,9 @@ async function getICHRA(calcId) {
 // 5) Fetch member-level ICHRA details
 async function getICHRAForMembers(calcId) {
   if (!calcId) throw new Error("getICHRAForMembers requires calcId");
-  return GET(`/ichra_affordability_calculations/${encodeURIComponent(calcId)}/members`);
+  return GET(
+    `/ichra_affordability_calculations/${encodeURIComponent(calcId)}/members`
+  );
 }
 
 module.exports = {
