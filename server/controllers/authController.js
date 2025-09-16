@@ -6,8 +6,10 @@ const { sendResetEmail, sendResetCode } = require("../utils/mailer");
 
 const JWT_SECRET  = process.env.JWT_SECRET  || "dev-secret";
 const JWT_EXPIRES = process.env.JWT_EXPIRES || "7d";
-const APP_BASE_URL = process.env.APP_BASE_URL || "http://localhost:3000";
-
+const isProd = process.env.NODE_ENV === "production";
+const APP_BASE_URL =
+  process.env.APP_BASE_URL ||
+  (isProd ? (() => { throw new Error("APP_BASE_URL must be set in production"); })() : "http://localhost:3000");
 /* ---------------- helpers ---------------- */
 
 function sign(user) {
