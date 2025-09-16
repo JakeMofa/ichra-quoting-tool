@@ -289,3 +289,61 @@
 .css-orb::before { display: none !important; }
 /* and if you’re not using the CSS orb at all, you can hide it entirely */
 .css-orb { display: none !important; }
+
+/* Floating tutorial button */
+.tutorial-fab {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  z-index: 50;
+}
+
+/* Responsive 16:9 video */
+.video-16x9 {
+  position: relative;
+  width: 100%;
+  padding-top: 56.25%; /* 16:9 */
+  border-radius: 10px;
+  overflow: hidden;
+  background: #0b1220;
+}
+.video-16x9 iframe {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+}
+
+/* Simple footer */
+.footer {
+  margin-top: 40px;
+  padding: 14px 16px;
+  border-top: 1px solid #1f2937;
+}
+.footer .footer-inner {
+  max-width: 960px; margin: 0 auto;
+  display: flex; gap: 10px; align-items: center; justify-content: center;
+}
+.footer a { color: #93c5fd; text-decoration: none; }
+.footer a:hover { text-decoration: underline; }
+
+
+
+/* Floating help button */
+.help-button {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  background: #2563eb;
+  color: white;
+  font-size: 14px;
+  font-weight: 500;
+  padding: 10px 16px;
+  border-radius: 9999px;
+  text-decoration: none;
+  box-shadow: 0 4px 10px rgba(0,0,0,0.25);
+  transition: background 0.2s ease;
+  z-index: 100;
+}
+
+.help-button:hover {
+  background: #1d4ed8;
+}

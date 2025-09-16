@@ -4,8 +4,10 @@ import { useAuth } from "../context/AuthContext";
 import "../styles/landing.css";
 
 import Orb3D from "../components/Orb3D";
+import TutorialModal from "../components/TutorialModal";
+import HelpButton from "../components/HelpButton";
 
-const USE_3D_ORB = true; // true = Three.js orb, false = CSS orb
+const USE_3D_ORB = true;
 
 export default function Landing() {
   const { isAuthed } = useAuth();
@@ -50,10 +52,18 @@ export default function Landing() {
               <Link to="/groups" className="btn btn-ghost">Run quotes</Link>
             </>
           ) : (
-            <p className="muted">Use the top-right buttons to Sign up or Log in to get started.</p>
+            <p className="muted">
+              Use the top-right buttons to Sign up or Log in to get started.
+            </p>
           )}
         </div>
       </div>
+
+      {/* Bottom-left: tutorial trigger (opens modal with your YouTube embed) */}
+      <TutorialModal />
+
+      {/* Bottom-right: floating “Need help?” email button */}
+      <HelpButton />
     </div>
   );
 }
