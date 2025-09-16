@@ -288,4 +288,4 @@
 /* If a CSS-orb ever sneaks into the DOM, kill its ring layer */
 .css-orb::before { display: none !important; }
 /* and if you’re not using the CSS orb at all, you can hide it entirely */
-// .css-orb { display: none !important; }
+.css-orb { display: none !important; }
