@@ -1,124 +1,122 @@
-// server/services/ideon.js
+// server/index.js
+require("dotenv").config({ path: "../.env" });
+const path = require("path");
+const express = require("express");
+const mongoose = require("mongoose");
+const cors = require("cors");
 
-// Notes:
-// - BASE_URL: https://api.ideonapi.com   (no trailing /v6 in the URL)
-// - ICHRA create is NESTED: POST /groups/{groupId}/ichra_affordability_calculations
-// - addMember: POST /groups/{groupId}/members
-// - Lightweight retry + throttle to respect ~100 rpm limit
-
-require("dotenv").config();
-const axios = require("axios");
-const Bottleneck = require("bottleneck");
-
-// --- Config ---
-const IDEON_API_KEY = process.env.IDEON_API_KEY || process.env.VERICRED_API_KEY || "";
-const IDEON_BASE_URL = process.env.IDEON_BASE_URL || "https://api.ideonapi.com";  
-
-// Throttle / rate limit
-const MIN_DELAY_FALLBACK_MS = Number(process.env.IDEON_MIN_DELAY_MS || 700);
-
-// Retry/backoff for 429/5xx
-const MAX_RETRIES = Number(process.env.IDEON_RETRY_MAX || 3);
-const INITIAL_BACKOFF_MS = Number(process.env.IDEON_RETRY_BASE_DELAY_MS || 500);
-
-// Bottleneck config (respects 100 rpm by default)
-const limiter = new Bottleneck({
-  reservoir: Number(process.env.IDEON_RATE_RESERVOIR || 100), // max tokens
-  reservoirRefreshAmount: Number(process.env.IDEON_RATE_RESERVOIR || 100),
-  reservoirRefreshInterval: Number(process.env.IDEON_RATE_INTERVAL_MS || 60000), // 1 minute
-  minTime: Number(process.env.IDEON_RATE_MIN_TIME_MS || MIN_DELAY_FALLBACK_MS),
-});
-
-const IDEON_LOG = String(process.env.IDEON_LOG || "false").toLowerCase() === "true";
-
-// --- Axios instance ---
-const api = axios.create({
-  baseURL: IDEON_BASE_URL,
-  headers: {
-    "Vericred-Api-Key": IDEON_API_KEY,
-    "Ideon-Api-Key": IDEON_API_KEY,
-    "Authorization": `Bearer ${IDEON_API_KEY}`,
-    "Content-Type": "application/json",
-    "Accept": "application/json",
-    "Accept-Version": "v6", // pin version
-  },
-  timeout: 15000,
-});
-
-// --- Retry wrapper ---
-async function requestWithRetry(fn, retries = MAX_RETRIES, backoff = INITIAL_BACKOFF_MS) {
-  try {
-    return await fn();
-  } catch (err) {
-    const status = err.response?.status;
-    const retriable = status === 429 || (status >= 500 && status <= 599);
-    if (retriable && retries > 0) {
-      const retryAfter = err.response?.headers?.["retry-after"];
-      const waitMs = retryAfter ? Number(retryAfter) * 1000 : backoff;
-      if (IDEON_LOG) console.warn(`[Ideon] HTTP ${status}. Retrying in ${waitMs}ms...`);
-      await new Promise((r) => setTimeout(r, waitMs));
-      return requestWithRetry(fn, retries - 1, Math.min(backoff * 2, 8000));
-    }
-    console.error("[Ideon] request failed:", {
-      status,
-      data: err.response?.data,
-      message: err.message,
-    });
-    throw err;
-  }
+// Swagger UI
+const swaggerUi = require("swagger-ui-express");
+const YAML = require("yamljs");
+const openapiPath = path.join(__dirname, "openapi.yaml");
+let swaggerDoc = null;
+try {
+  swaggerDoc = YAML.load(openapiPath);
+} catch (e) {
+  console.warn("⚠️ openapi.yaml not found or invalid; /api-docs will 404");
 }
 
-// --- Low-level HTTP helpers with Bottleneck + retry ---
-async function POST(path, data) {
-  return limiter.schedule(async () => {
-    if (IDEON_LOG) console.log(`[Ideon] POST ${path}`);
-    return requestWithRetry(() => api.post(path, data));
-  });
-}
+// Routes
+const groupRoutes = require("./routes/groups");
+const classRoutes = require("./routes/classes");
+const memberRoutes = require("./routes/members");
+const ichraRoutes = require("./routes/ichra");
+const quoteRoutes = require("./routes/quote");
+const summaryRoutes = require("./routes/summary");
+const authRoutes = require("./routes/auth"); 
 
-async function GET(path, params) {
-  return limiter.schedule(async () => {
-    if (IDEON_LOG) console.log(`[Ideon] GET ${path}`);
-    return requestWithRetry(() => api.get(path, { params }));
-  });
-}
+// Register models that need to be loaded on startup
+require("./models/ICHRAClass");
+require("./models/Member");
+require("./models/AfforadabilityResult");
 
-// --- Public API ---
-// 1) Create Group
-async function createGroup(groupData) {
-  return POST("/groups", groupData);
-}
+const app = express();
+app.use(express.json());
 
-// 2) Add Member
-async function addMember(groupId, memberData) {
-  if (!groupId) throw new Error("addMember requires groupId");
-  return POST(`/groups/${encodeURIComponent(groupId)}/members`, memberData);
-}
+// ---- CORS (explicit origin + custom headers) ----
+const ALLOWED =
+  process.env.ALLOWED_ORIGIN?.split(",").map((s) => s.trim()).filter(Boolean) || [
+    "http://localhost:3000",
+  ];
 
-// 3) ICHRA affordability (NESTED under /groups/{id})
-async function startICHRA(groupId, payload) {
-  if (!groupId) throw new Error("startICHRA requires groupId");
-  return POST(`/groups/${encodeURIComponent(groupId)}/ichra_affordability_calculations`, payload);
-}
-
-// 4) Poll ICHRA calc status
-async function getICHRA(calcId) {
-  if (!calcId) throw new Error("getICHRA requires calcId");
-  return GET(`/ichra_affordability_calculations/${encodeURIComponent(calcId)}`);
-}
-
-// 5) Fetch member-level ICHRA details
-async function getICHRAForMembers(calcId) {
-  if (!calcId) throw new Error("getICHRAForMembers requires calcId");
-  return GET(`/ichra_affordability_calculations/${encodeURIComponent(calcId)}/members`);
-}
-
-module.exports = {
-  createGroup,
-  addMember,
-  startICHRA,
-  getICHRA,
-  getICHRAForMembers,
-  POST,
-  GET,
+const corsOptions = {
+  origin: ALLOWED,
+  credentials: true,
+  methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: [
+    "Content-Type",
+    "Authorization",
+    "X-Mock-Mode",
+    "X-Ideon-Key",
+  ],
 };
+app.use(cors(corsOptions));
+app.options(/^\/.*$/, cors(corsOptions));
+
+// ---- Per-request context (mock + ideonKey) ----
+app.use((req, _res, next) => {
+  if (req.path.startsWith("/api")) {
+    const rawMock = req.get("X-Mock-Mode");
+    const mock =
+      rawMock === "1" ||
+      rawMock === "true" ||
+      rawMock === "on" ||
+      rawMock === "yes";
+    const ideonKeyHeader = req.get("X-Ideon-Key");
+    const ideonKey =
+      ideonKeyHeader && ideonKeyHeader.trim() ? ideonKeyHeader.trim() : undefined;
+
+    req.ctx = { mock, ideonKey };
+
+    // lightweight header log to verify flow
+    console.log("[hdr]", req.method, req.path, {
+      mock: mock ? "1" : undefined,
+      key: ideonKey ? "present" : undefined,
+    });
+  }
+  next();
+});
+
+const PORT = process.env.PORT || 5050;
+const MONGO_URI = process.env.MONGO_URI;
+console.log(">>> Using MONGO_URI:", MONGO_URI);
+
+// Swagger UI route
+if (swaggerDoc) {
+  app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerDoc, { explorer: true }));
+} else {
+  app.use("/api-docs", (_req, res) => res.status(404).json({ error: "openapi.yaml missing" }));
+}
+
+// Mount routes
+app.use("/api/groups", groupRoutes);                    // /api/groups/:id
+app.use("/api/groups", classRoutes);                    // /api/groups/:id/classes
+app.use("/api/groups/:groupId/members", memberRoutes);  // /api/groups/:groupId/members
+app.use("/api", ichraRoutes);                           // e.g. /api/groups/:id/members/:id/ichra
+app.use("/api", quoteRoutes);                           // e.g. /api/groups/:id/quotes
+app.use("/api", summaryRoutes);
+app.use("/api/auth", authRoutes);   
+
+// Smoke test under /api
+app.get("/api/ping", (_req, res) => {
+  console.log(">>> /api/ping called");
+  res.json({ message: "pong" });
+});
+
+// Connect DB + start server
+mongoose
+  .connect(MONGO_URI, {
+    serverSelectionTimeoutMS: 5000, // fail fast if can’t connect
+    family: 4,                      // force IPv4 instead of IPv6
+  })
+  .then(() => {
+    console.log(" MongoDB connected:", MONGO_URI);
+    app.listen(PORT, () => {
+      console.log(` Server running on port ${PORT}`);
+      console.log(` Swagger docs at http://localhost:${PORT}/api-docs`);
+    });
+  })
+  .catch((err) => {
+    console.error(" MongoDB connection error:", err.message);
+    process.exit(1);
+  });

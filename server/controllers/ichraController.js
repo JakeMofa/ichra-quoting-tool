@@ -7,6 +7,7 @@ const AffordabilityResult = require("../models/AfforadabilityResult");
 // POST /api/groups/:groupId/members/:memberId/ichra  (creates a new calc record)
 exports.calculateICHRA = async (req, res) => {
   const { groupId, memberId } = req.params;
+  const ctx = req.ctx || {}; // ⬅ : per-request context (mock + key)
   console.log(">>> Inside calculateICHRA for group:", groupId, "member:", memberId);
 
   try {
@@ -17,6 +18,25 @@ exports.calculateICHRA = async (req, res) => {
     const member = await Member.findById(memberId);
     if (!member || member.group.toString() !== groupId) {
       return res.status(404).json({ error: "Member not found in this group" });
+    }
+
+    // Live Ideon calls require an actual key and (in your current schema) an Ideon group id.
+    // If mock OR no key -> short-circuit to mock response before touching Ideon.
+    if (ctx.mock || !ctx.ideonKey) { // ⬅ : mock shortcut
+      const resultDoc = new AffordabilityResult({
+        group: groupId,
+        member: memberId,
+        minimum_employer_contribution: 400,
+        fpl_minimum_employer_contribution: 500,
+        premium_tax_credit: 200,
+        benchmark_plan_id: "mock-benchmark-plan",
+        benchmark_premium: 600,
+        affordable: true,
+        raw_response: { mock: true, reason: ctx.mock ? "mock-mode" : "missing-key" },
+      });
+      await resultDoc.save();
+      console.log(">>> Affordability results saved (mock short-circuit):", resultDoc._id);
+      return res.status(201).json({ message: "ICHRA calculated (mock)", result: resultDoc });
     }
 
     if (!group.ideon_group_id) {
@@ -30,43 +50,43 @@ exports.calculateICHRA = async (req, res) => {
     //    - plan_year: number
     //    - effective_date: YYYY-MM-DD
     const rawLocation =
-    req.query.location ??
-    req.query.rating_area_location ??
-    req.body?.rating_area_location ??
-    "work";
-  
-  const ratingAreaLocation =
-    (typeof rawLocation === "string" &&
-      (rawLocation.toLowerCase() === "home" || rawLocation.toLowerCase() === "work"))
-      ? rawLocation.toLowerCase()
-      : "work";
-  
-  const planYear =
-    req.query.plan_year != null
-      ? Number(req.query.plan_year)
-      : (req.body?.plan_year != null ? Number(req.body.plan_year) : new Date().getFullYear());
-  
-  const effectiveDate =
-    (typeof req.query.effective_date === "string" && req.query.effective_date) ||
-    (typeof req.body?.effective_date === "string" && req.body.effective_date) ||
-    new Date().toISOString().split("T")[0];
+      req.query.location ??
+      req.query.rating_area_location ??
+      req.body?.rating_area_location ??
+      "work";
+
+    const ratingAreaLocation =
+      (typeof rawLocation === "string" &&
+        (rawLocation.toLowerCase() === "home" || rawLocation.toLowerCase() === "work"))
+        ? rawLocation.toLowerCase()
+        : "work";
+
+    const planYear =
+      req.query.plan_year != null
+        ? Number(req.query.plan_year)
+        : (req.body?.plan_year != null ? Number(req.body.plan_year) : new Date().getFullYear());
+
+    const effectiveDate =
+      (typeof req.query.effective_date === "string" && req.query.effective_date) ||
+      (typeof req.body?.effective_date === "string" && req.body.effective_date) ||
+      new Date().toISOString().split("T")[0];
 
     console.log(">>> Found group + member, calling Ideon ICHRA API...");
-
-    let resultData;
 
     try {
       // 3) Start calc (nested endpoint)
       const startPayload = {
         ichra_affordability_calculation: {
           effective_date: effectiveDate,
-          plan_year: planYear,                   // optional but accepted by Ideon
+          plan_year: planYear,                      // optional but accepted by Ideon
           rating_area_location: ratingAreaLocation, // "home" or "work"
         },
       };
 
       console.log(">>> Starting ICHRA with ideon_group_id:", group.ideon_group_id, "payload:", startPayload);
-      const startRes = await ideon.startICHRA(group.ideon_group_id, startPayload);
+
+      // ⬅ : pass ctx so this request uses the per-request Ideon key
+      const startRes = await ideon.startICHRA(group.ideon_group_id, startPayload, ctx);
 
       const calcId =
         startRes?.data?.id ||
@@ -85,7 +105,9 @@ exports.calculateICHRA = async (req, res) => {
 
       for (let i = 0; i < 10; i++) {
         await new Promise((r) => setTimeout(r, 1200));
-        const statusRes = await ideon.getICHRA(calcId);
+
+        // ⬅ : pass ctx
+        const statusRes = await ideon.getICHRA(calcId, ctx);
 
         status =
           statusRes?.data?.status ||
@@ -106,8 +128,8 @@ exports.calculateICHRA = async (req, res) => {
         throw new Error(`Affordability calculation status: ${status}`);
       }
 
-      // 5) Get member-level results
-      const membersRes = await ideon.getICHRAForMembers(calcId);
+      // 5) Get member-level results (⬅️ NEW: pass ctx)
+      const membersRes = await ideon.getICHRAForMembers(calcId, ctx);
       const resultsArr = membersRes?.data?.members || [];
 
       const pickExternal = (m) =>
@@ -189,7 +211,7 @@ exports.calculateICHRA = async (req, res) => {
       });
       await resultDoc.save();
 
-      //reread from mongo to ensure we return the  finalized values
+      // reread from mongo to ensure we return the finalized values
       const saved = await AffordabilityResult.findById(resultDoc._id).lean();
 
       console.log(">>> Affordability results saved:", resultDoc._id);
@@ -215,9 +237,8 @@ exports.calculateICHRA = async (req, res) => {
       });
       await resultDoc.save();
 
-      //Re-read same thing  for ichra
+      // Re-read same thing for ichra
       const saved = await AffordabilityResult.findById(resultDoc._id).lean();
-
 
       console.log(">>> Affordability results saved (mock):", resultDoc._id);
       return res.status(201).json({ message: "ICHRA calculated", result: resultDoc });

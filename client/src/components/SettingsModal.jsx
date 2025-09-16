@@ -1,6 +1,7 @@
 // client/src/components/SettingsModal.jsx
 import { useState, useEffect } from "react";
 import { useAuth } from "../context/AuthContext";
+import { saveSettingsToStorage } from "../api/authHeaders";
 import "../styles/settings.css"; // we'll create this next
 
 export default function SettingsModal({ open, onClose }) {
@@ -18,7 +19,9 @@ export default function SettingsModal({ open, onClose }) {
   if (!open) return null;
 
   const save = () => {
-    setSettings({ mockMode, ideonKey: ideonKey.trim() });
+    const next = { mockMode, ideonKey: ideonKey.trim() };
+    setSettings(next);              // update React context
+    saveSettingsToStorage(next);    // persist into localStorage
     onClose();
   };
 
@@ -27,7 +30,9 @@ export default function SettingsModal({ open, onClose }) {
       <div className="settings-modal" onClick={(e) => e.stopPropagation()}>
         <div className="settings-header">
           <h3>Settings</h3>
-          <button className="close-btn" onClick={onClose}>×</button>
+          <button className="close-btn" onClick={onClose}>
+            ×
+          </button>
         </div>
 
         <div className="settings-body">
@@ -57,8 +62,12 @@ export default function SettingsModal({ open, onClose }) {
         </div>
 
         <div className="settings-footer">
-          <button className="btn" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary" onClick={save}>Save</button>
+          <button className="btn" onClick={onClose}>
+            Cancel
+          </button>
+          <button className="btn btn-primary" onClick={save}>
+            Save
+          </button>
         </div>
       </div>
     </div>

@@ -1,21 +1,30 @@
 // server/controllers/affordabilityHelpers.js
 const AffordabilityResult = require("../models/AfforadabilityResult");
-const { startICHRA, getICHRA, getICHRAForMembers } = require("../services/ideon");
+const {
+  startICHRA,
+  getICHRA,
+  getICHRAForMembers,
+} = require("../services/ideon");
 
-const IDEON_LOG = String(process.env.IDEON_LOG || "").toLowerCase() === "true";
+const IDEON_LOG = String(process.env.IDEON_LOG || "")
+  .toLowerCase() === "true";
 
-/*
-  Poll until an ICHRA calc reaches "completed"/"complete" or fails/times out.
+/**
+ * Poll until an ICHRA calc reaches "completed"/"complete" or fails/times out.
+ * Accepts ctx so polling requests use the same per-request Ideon key.
  */
-async function waitForIchraComplete(calcId, { timeoutMs = 60_000, intervalMs = 1_500 } = {}) {
+async function waitForIchraComplete(calcId, ctx, { timeoutMs = 60_000, intervalMs = 1_500 } = {}) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
-    const { data } = await getICHRA(calcId);
+    const { data } = await getICHRA(calcId, ctx);
     const status = data?.ichra_affordability_calculation?.status || data?.status || "";
     const norm = String(status).toLowerCase();
+
     if (IDEON_LOG) console.log(">>> ICHRA poll status:", norm);
+
     if (norm === "completed" || norm === "complete") return data;
     if (norm === "failed") throw new Error("Ideon ICHRA calculation failed");
+
     await new Promise((r) => setTimeout(r, intervalMs));
   }
   throw new Error("Timed out waiting for Ideon ICHRA calculation");
@@ -30,7 +39,7 @@ function buildIchraStartPayload({
   effective_date,
   plan_year,
   member,
-  rating_area_location, // can be "work" | "home" | object
+  rating_area_location, // "work" | "home" | object
 }) {
   let ratingLoc;
   if (typeof rating_area_location === "string" && rating_area_location.length > 0) {
@@ -53,7 +62,7 @@ function buildIchraStartPayload({
 }
 
 /**
- * Try to select THIS member’s row from Ideon’s /members response 
+ * Try to select THIS member’s row from Ideon’s /members response.
  */
 function selectTargetMemberRow(rows, member) {
   const mExt = String(member.external_id || "");
@@ -133,10 +142,21 @@ function mapIdeonRowToAffordability({ row, groupId, memberId, effective_date }) 
  * Return the saved doc (lean) or null.
  *
  * Options supports `rating_area_location` override (e.g., "work").
+ * Accepts ctx to honor mock mode + per-request key.
  */
-async function ensureIdeonAffordability({ group, member, effective_date, rating_area_location }) {
+async function ensureIdeonAffordability({
+  group,
+  member,
+  effective_date,
+  rating_area_location,
+  ctx = {}, // ← per-request context: { mock, ideonKey }
+}) {
   try {
-    if (!process.env.IDEON_API_KEY) return null;
+    // Respect mock mode or missing key: do nothing, return null.
+    if (ctx.mock || !ctx.ideonKey) {
+      if (IDEON_LOG) console.log(">>> Skipping Ideon (mock or no key)");
+      return null;
+    }
 
     const startPayload = buildIchraStartPayload({
       effective_date,
@@ -149,17 +169,17 @@ async function ensureIdeonAffordability({ group, member, effective_date, rating_
 
     if (IDEON_LOG) console.log(">>> Starting ICHRA with:", { groupIdentifier, startPayload });
 
-    // Start calc
-    const { data: started } = await startICHRA(groupIdentifier, startPayload);
+    // Start calc (ctx forwards per-request key)
+    const { data: started } = await startICHRA(groupIdentifier, startPayload, ctx);
     const calcId = started?.ichra_affordability_calculation?.id || started?.id;
     if (!calcId) throw new Error("Ideon did not return calculation id");
     if (IDEON_LOG) console.log(">>> ICHRA started:", calcId);
 
-    // Wait for completion
-    await waitForIchraComplete(calcId);
+    // Wait for completion (ctx)
+    await waitForIchraComplete(calcId, ctx);
 
-    // Fetch member-level results
-    const { data: membersPayload } = await getICHRAForMembers(calcId);
+    // Fetch member-level results (ctx)
+    const { data: membersPayload } = await getICHRAForMembers(calcId, ctx);
     const rows = Array.isArray(membersPayload?.members)
       ? membersPayload.members
       : Array.isArray(membersPayload)

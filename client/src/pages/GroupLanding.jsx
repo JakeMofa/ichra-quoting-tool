@@ -206,6 +206,7 @@ export default function GroupLanding() {
         </button>
       </div>
 
+      
       {/* Use existing Group ID */}
       <div className="card">
         <div className="label">Use existing Group ID</div>
@@ -213,15 +214,22 @@ export default function GroupLanding() {
           Paste your Mongo <code>groupId</code> to proceed.
         </p>
 
-        <div className="row wrap" style={{ gap: 8, alignItems: 'end' }}>
+        {/* Input gets its own row so it can be full-width on phones */}
+        <div className="row" style={{ gap: 8, alignItems: 'end' }}>
           <input
             className="input"
             placeholder="e.g. 68c3039dd33451943e5cd0f4"
             value={groupId}
             onChange={(e) => setGroupId(e.target.value)}
-            style={{ minWidth: 360 }}
-            onKeyDown={async (e) => { if (e.key === 'Enter') { e.preventDefault(); await handleGo('quotes'); } }}
+            style={{ flex: 1, minWidth: 0 }}  // was minWidth: 360
+            onKeyDown={async (e) => {
+              if (e.key === 'Enter') { e.preventDefault(); await handleGo('quotes'); }
+            }}
           />
+        </div>
+
+        {/* Buttons in a separate, wrapping row */}
+        <div className="actionRow">
           <button className="chip" onClick={() => handleGo('quotes')} disabled={!groupId.trim() || goLoading}>
             {goLoading ? 'Checking…' : 'Open Quotes'}
           </button>

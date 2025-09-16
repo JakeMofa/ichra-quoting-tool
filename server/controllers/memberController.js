@@ -43,6 +43,7 @@ async function resolveFipsForZip(zip) {
 exports.createMember = async (req, res) => {
   const { groupId } = req.params;
   const payload = req.body;
+  const ctx = req.ctx || {}; //⬅ : per-request context (mock + ideonKey)
   console.log(">>> Inside createMember, groupId:", groupId, "payload:", payload);
 
   let ideonMemberId = null;
@@ -93,56 +94,64 @@ exports.createMember = async (req, res) => {
     // 3) external_id is REQUIRED (unique per group; your model enforces indexing)
     const externalId = payload.external_id || genExternalId();
 
-    // 4) Try Ideon addMember if we have ideon_group_id and required fields
+    // 4) Try Ideon addMember if not in mock and a key is present
     try {
-      if (!group.ideon_group_id) throw new Error("Missing ideon_group_id on group");
-
-      const ideonPayload = {
-        members: [
-          {
-            first_name: payload.first_name,
-            last_name: payload.last_name,
-            date_of_birth:
-              payload.dob || payload.date_of_birth || "1990-01-01",
-            gender: payload.gender || "U",
-
-            // geography — prefer member ZIP/FIPS; fallback to group location only if missing
-            zip_code: zipCode || groupLoc.zip_code || null,
-            fips_code: fipsCode || groupLoc.fips_code || null,
-            location_id: locationId, // required by Ideon
-
-            // flags
-            cobra: false,
-            retiree: false,
-            last_used_tobacco: null,
-
-            // dependents + affordability inputs (optional)
-            dependents: payload.dependents || [],
-            household_income: payload.household_income,
-            safe_harbor_income: payload.safe_harbor_income,
-            household_size: payload.household_size,
-
-            // key used to match ICHRA results later
-            external_id: externalId,
-          },
-        ],
-      };
-
-      console.log(">>> Calling Ideon API addMember...");
-      const ideonRes = await ideon.addMember(
-        group.ideon_group_id,
-        ideonPayload
-      );
-
-      if (ideonRes?.data?.members?.length) {
-        ideonMemberId = ideonRes.data.members[0].id || null;
-        ideonData = ideonRes.data.members[0];
-        console.log(">>> Ideon member created:", ideonMemberId);
-      } else {
+      if (ctx.mock || !ctx.ideonKey) {
+        // ⬅  short-circuit when mock mode is on OR no per-request key provided
         ideonMemberId = `mock-${uuidv4()}`;
-        console.warn(
-          ">>> Ideon addMember returned no members array, using mock id"
+        console.log(">>> Skipping Ideon (mock or missing key). Using:", ideonMemberId);
+      } else {
+        if (!group.ideon_group_id) throw new Error("Missing ideon_group_id on group");
+
+        const ideonPayload = {
+          members: [
+            {
+              first_name: payload.first_name,
+              last_name: payload.last_name,
+              date_of_birth:
+                payload.dob || payload.date_of_birth || "1990-01-01",
+              gender: payload.gender || "U",
+
+              // geography — prefer member ZIP/FIPS; fallback to group location only if missing
+              zip_code: zipCode || groupLoc.zip_code || null,
+              fips_code: fipsCode || groupLoc.fips_code || null,
+              location_id: locationId, // required by Ideon
+
+              // flags
+              cobra: false,
+              retiree: false,
+              last_used_tobacco: null,
+
+              // dependents + affordability inputs (optional)
+              dependents: payload.dependents || [],
+              household_income: payload.household_income,
+              safe_harbor_income: payload.safe_harbor_income,
+              household_size: payload.household_size,
+
+              // key used to match ICHRA results later
+              external_id: externalId,
+            },
+          ],
+        };
+
+        console.log(">>> Calling Ideon API addMember...");
+        // ⬅️ NEW: pass ctx so this call uses the per-request key
+        const ideonRes = await ideon.addMember(
+          group.ideon_group_id,
+          ideonPayload,
+          ctx
         );
+
+        if (ideonRes?.data?.members?.length) {
+          ideonMemberId = ideonRes.data.members[0].id || null;
+          ideonData = ideonRes.data.members[0];
+          console.log(">>> Ideon member created:", ideonMemberId);
+        } else {
+          ideonMemberId = `mock-${uuidv4()}`;
+          console.warn(
+            ">>> Ideon addMember returned no members array, using mock id"
+          );
+        }
       }
     } catch (err) {
       console.warn(
@@ -180,7 +189,7 @@ exports.createMember = async (req, res) => {
       foreign_earned_income: payload.foreign_earned_income,
       tax_year: payload.tax_year,
 
-      //  : prior contributions (internal-only; NOT sent to Ideon)
+      // prior contributions (internal-only; NOT sent to Ideon)
       old_employer_contribution: payload.old_employer_contribution ?? null,
       old_employee_contribution: payload.old_employee_contribution ?? null,
 

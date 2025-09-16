@@ -140,4 +140,85 @@ button:hover:not(:disabled) { background:#202744; }
   overflow-y: auto;
 }
 
+/* --- GroupLanding responsive layout --- */
+.group-page {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 12px 12px 32px;
+}
 
+/* the row that holds the "Open Quotes / Members / Classes" buttons */
+.actionRow {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: flex-start;
+  flex-wrap: wrap;          /* allow wrapping on small screens */
+  margin-top: 10px;
+}
+
+/* make each chip wrap nicely and never overflow */
+.actionRow .chip,
+.actionRow button,
+.actionRow a {
+  flex: 0 1 auto;
+  max-width: 100%;
+}
+
+/* phones: form a neat 2-across grid */
+@media (max-width: 480px) {
+  .actionRow {
+    justify-content: center;
+  }
+  .actionRow .chip,
+  .actionRow button,
+  .actionRow a {
+    flex: 1 1 calc(50% - 10px);
+    text-align: center;
+  }
+}
+
+/* belt-and-suspenders: kill any horizontal scroll */
+html, body { overflow-x: hidden; }
+
+/* --- GroupLanding responsive layout helpers --- */
+.actionRow{
+  display:flex;gap:10px;align-items:center;justify-content:flex-start;flex-wrap:wrap;margin-top:10px;
+}
+.actionRow .chip,
+.actionRow button,
+.actionRow a{flex:0 1 auto;max-width:100%}
+@media (max-width:480px){
+  .actionRow{justify-content:center}
+  .actionRow .chip,
+  .actionRow button,
+  .actionRow a{flex:1 1 calc(50% - 10px);text-align:center}
+}
+/* prevent accidental horizontal scroll */
+html,body{overflow-x:hidden}
+
+
+/* --- Mobile form safety net (Members, etc.) --- */
+
+/* Inputs/selects must be allowed to shrink inside flex/grid cells */
+input.input, select, textarea {
+  width: 100%;
+  min-width: 0;
+}
+
+/* When the viewport is narrow, wrap .row children and let them
+   take the full line if needed. This prevents right-side clipping. */
+@media (max-width: 760px) {
+  .row {
+    flex-wrap: wrap;                 /* allow children onto the next line */
+    align-items: stretch;            /* nice vertical alignment for inputs */
+    gap: 10px;
+  }
+  .row > * {
+    flex: 1 1 320px;                 /* each child can shrink/grow, min ~320px */
+    min-width: 0;                    /* critical: actually allow shrinking */
+  }
+}
+
+/* If any card still tries to push out horizontally, keep it contained */
+.card { overflow-x: hidden; }

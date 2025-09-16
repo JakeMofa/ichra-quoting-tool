@@ -1,5 +1,5 @@
 // src/pages/Quotes.jsx
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { api } from '../api';
 import Stepper from '../components/Stepper';
@@ -14,7 +14,7 @@ function memberDisplay(m) {
 export default function Quotes() {
   const { groupId } = useParams();
 
-  // inputs (these are the only ones that change the batch signature)
+  // inputs that change the "signature" of a quotes run
   const [effectiveDate, setEffectiveDate] = useState(() =>
     new Date().toISOString().slice(0, 10)
   );
@@ -26,62 +26,75 @@ export default function Quotes() {
   const [progressMsg, setProgressMsg] = useState('');
 
   // data
-  const [batch, setBatch] = useState(null);        // result of GET /quotes (or POST /quotes -> result)
-  const [activeMember, setActiveMember] = useState(null); // for county selection
+  const [batch, setBatch] = useState(null);            // GET /quotes result
+  const [activeMember, setActiveMember] = useState(null); // for county modal
 
-  // polling cancel
+  // polling / in-flight guards
   const pollAbortRef = useRef(null);
+  const inFlight = useRef(null);   // { key, ctrl }
+  const lastKey = useRef('');      // last successful GET key to avoid duplicate bursts
 
-  // ---- helpers ----
+  // ---------- derived ----------
   const entries = useMemo(() => Array.isArray(batch?.quotes) ? batch.quotes : [], [batch]);
   const nextSkipped = useMemo(() => entries.find(e => e?.meta?.skipped === true), [entries]);
   const allResolved = entries.length > 0 && entries.every(e => e?.meta?.skipped !== true);
   const anyQuotes   = entries.some(e => Array.isArray(e?.quotes) && e.quotes.length > 0);
 
-  // A tiny signature so we know if inputs changed
   const signature = `${effectiveDate}|${tobacco ? 1 : 0}`;
   const sigKey = `quotes:lastSignature:${groupId}`;
 
-  // ---------- initial load: pull existing quotes, maybe auto-run ----------
-  useEffect(() => {
-    let mounted = true;
-    (async () => {
-      setError('');
-      setProgressMsg('Loading latest quotes…');
-      try {
-        const latest = await api.quotesLatest(groupId);
-        if (!mounted) return;
+  // ---------- helpers ----------
+  const fetchLatest = useCallback(async () => {
+    if (!groupId) return;
 
-        const list = Array.isArray(latest?.quotes) ? latest.quotes : [];
+    const key = `GET:${groupId}`;
+    // If a same GET is in-flight, or we just fetched the same thing, bail.
+    if (inFlight.current || lastKey.current === key) return;
 
-        if (list.length > 0) {
-          // We already have quotes – show them immediately.
-          setBatch(latest);
-          setProgressMsg('');
-        } else {
-          // No quotes yet → try to auto-run using current inputs
-          const lastSig = localStorage.getItem(sigKey);
-          if (lastSig !== signature) {
-            await safeRunQuotes(); // fire-and-poll
-          } else {
-            setProgressMsg('No quotes yet. Click “Run Quotes”.');
-          }
-        }
-      } catch {
-        // If GET /quotes fails because server is still building something, start a poll anyway
-        setProgressMsg('Preparing quotes…');
-        try {
-          await pollUntilReady({});
-        } catch (e) {
-          setError(e.message || 'Could not load quotes.');
-        }
+    setError('');
+    setProgressMsg((msg) => msg || 'Loading latest quotes…');
+
+    const ctrl = new AbortController();
+    inFlight.current = { key, ctrl };
+
+    try {
+      const latest = await api.quotesLatest(groupId, { signal: ctrl.signal });
+      setBatch(latest || null);
+      lastKey.current = key;
+      setProgressMsg('');
+    } catch (e) {
+      if (e?.name !== 'AbortError') {
+        setError(e?.message || 'Could not load quotes.');
       }
-    })();
-    return () => { mounted = false; if (pollAbortRef.current) pollAbortRef.current.abort(); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [groupId]); // run once per group
+    } finally {
+      // clear in-flight lock
+      inFlight.current = null;
+    }
+  }, [groupId]);
 
-  // ---------- auto / prompt county resolution ----------
+  const cancelInFlight = useCallback(() => {
+    inFlight.current?.ctrl?.abort();
+    inFlight.current = null;
+  }, []);
+
+  // ---------- initial load (once per groupId) ----------
+  useEffect(() => {
+    setBatch(null);
+    setError('');
+    setProgressMsg('Loading latest quotes…');
+    cancelInFlight();
+    fetchLatest();
+
+    return () => {
+      cancelInFlight();
+      if (pollAbortRef.current) {
+        pollAbortRef.current.abort();
+        pollAbortRef.current = null;
+      }
+    };
+  }, [groupId, fetchLatest, cancelInFlight]);
+
+  // ---------- resolve "needs county" automatically / via modal ----------
   useEffect(() => {
     if (!nextSkipped) { setActiveMember(null); return; }
 
@@ -90,6 +103,7 @@ export default function Quotes() {
     const enriched = { memberId: m._id, first_name: m.first_name, last_name: m.last_name, zip_code: m.zip_code, county_ids: ids };
 
     if (ids.length === 1) {
+      // auto-pick the only option, then refresh once
       (async () => {
         try {
           await api.previewQuotes(groupId, {
@@ -98,8 +112,7 @@ export default function Quotes() {
             effective_date: effectiveDate,
             tobacco,
           });
-          const latest = await api.quotesLatest(groupId);
-          setBatch(latest || null);
+          await fetchLatest(); // single refresh, no loop
           setActiveMember(null);
         } catch (e) {
           setError(e.message || 'Failed to preview quotes for selected county');
@@ -108,9 +121,9 @@ export default function Quotes() {
     } else {
       setActiveMember(enriched);
     }
-  }, [nextSkipped, groupId, effectiveDate, tobacco]);
+  }, [nextSkipped, groupId, effectiveDate, tobacco, fetchLatest]);
 
-  // ---------- run + poll (smart) ----------
+  // ---------- poller used only when a run is in progress ----------
   async function pollUntilReady({ intervalMs = 1200, maxMs = 120000 }) {
     if (pollAbortRef.current) pollAbortRef.current.abort();
     const ac = new AbortController();
@@ -118,16 +131,22 @@ export default function Quotes() {
 
     const start = Date.now();
     let attempt = 0;
+
     while (!ac.signal.aborted) {
       attempt += 1;
       try {
-        const latest = await api.quotesLatest(groupId);
+        const latest = await api.quotesLatest(groupId, { signal: ac.signal });
         const list = Array.isArray(latest?.quotes) ? latest.quotes : [];
-        const done = list.length > 0 && (list.some(e => Array.isArray(e?.quotes) && e.quotes.length > 0) || list.every(e => e?.meta?.skipped !== true));
+        const done =
+          list.length > 0 &&
+          (list.some(e => Array.isArray(e?.quotes) && e.quotes.length > 0) ||
+           list.every(e => e?.meta?.skipped !== true));
+
         setBatch(latest || null);
         if (done) return true;
-      } catch {
-        // ignore and keep polling
+      } catch (e) {
+        if (e?.name === 'AbortError') return false; // canceled
+        // else ignore and keep polling
       }
 
       if (Date.now() - start > maxMs) {
@@ -144,19 +163,19 @@ export default function Quotes() {
     setError('');
     setProgressMsg('Starting quotes job…');
     setBatch(null);
+    cancelInFlight(); // ensure GET de-dupe doesn’t block us
 
     try {
-      // Fire the job. If the request times out (backend busy), still poll.
+      // Fire-and-forget kick; polling will pick it up even if this times out.
       try {
         await api.runQuotes(groupId, {
           effective_date: effectiveDate,
           tobacco,
           rating_area_location: 'work',
-          // prevent backend from kicking ICHRA again:
-          skip_ichra: true,
+          skip_ichra: true, // don't re-run ICHRA calc if server can reuse it
         });
       } catch {
-        // swallow network abort/timeout here — polling will pick up status
+        /* swallow; poller will catch status */
       }
 
       await pollUntilReady({});
@@ -170,18 +189,13 @@ export default function Quotes() {
   }
 
   async function runQuotes() {
-    // If we already have quotes for this exact signature, just refresh latest and show
+    // Quick path: if same inputs already have results, just fetch latest once.
     const lastSig = localStorage.getItem(sigKey);
     if (lastSig === signature) {
       setProgressMsg('Loading existing quotes…');
-      try {
-        const latest = await api.quotesLatest(groupId);
-        setBatch(latest || null);
-        setProgressMsg('');
-        return;
-      } catch {
-        // fall through to full run if GET fails
-      }
+      await fetchLatest();
+      setProgressMsg('');
+      return;
     }
     await safeRunQuotes();
   }
@@ -190,61 +204,33 @@ export default function Quotes() {
     if (!activeMember?.memberId) return;
     try {
       setError('');
-      const preview = await api.previewQuotes(groupId, {
+      await api.previewQuotes(groupId, {
         member_id: activeMember.memberId,
         county_id: countyId,
         effective_date: effectiveDate,
         tobacco,
       });
-
-      // merge into UI immediately
-      setBatch(prev => {
-        if (!prev) return prev;
-        const quotes = Array.isArray(prev.quotes) ? [...prev.quotes] : [];
-        const idx = quotes.findIndex(q => q?.member?._id === activeMember.memberId);
-        if (idx !== -1) {
-          const prevEntry = quotes[idx] || {};
-          quotes[idx] = {
-            ...prevEntry,
-            meta: { ...(prevEntry.meta || {}), skipped: false, county_id: preview?.meta?.county_id || countyId },
-            quotes: Array.isArray(preview?.quotes) ? preview.quotes : [],
-          };
-        }
-        return { ...prev, quotes };
-      });
-
+      // A single refresh (no effect chained to entries)
+      await fetchLatest();
       setActiveMember(null);
     } catch (e) {
       setError(e.message || 'Failed to preview quotes for selected county');
     }
   }
 
-  // ------- AFTER RESOLVE: refresh with GET only (no re-POST that restarts ICHRA) -------
-  useEffect(() => {
-    (async () => {
-      if (!(entries.length > 0 && entries.every(e => e?.meta?.skipped !== true))) return;
-      try {
-        const latest = await api.quotesLatest(groupId);
-        setBatch(latest || null);
-      } catch {
-        /* no-op */
-      }
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entries]);
-
   return (
     <div className="card">
       <Stepper />
       <h2>Run Quotes</h2>
 
-      <div className="row" style={{ marginBottom: 10, alignItems: 'center' }}>
+      <div className="row" style={{ marginBottom: 10, alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
         <label className="label" style={{ marginRight: 8 }}>Effective Date</label>
         <input
           type="date"
           className="input"
           value={effectiveDate}
           onChange={(e) => setEffectiveDate(e.target.value)}
+          style={{ minWidth: 220 }}
         />
         <label className="label" style={{ marginLeft: 12 }}>Tobacco</label>
         <input
@@ -274,7 +260,6 @@ export default function Quotes() {
         </div>
       )}
 
-      {/* quick debug surface */}
       {entries.length > 0 && (
         <div className="card">
           <div className="label">Latest Batch (trimmed view)</div>

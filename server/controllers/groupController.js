@@ -42,54 +42,24 @@ function transformGroupDoc(doc) {
 // --- create a group ---
 exports.createGroup = async (req, res) => {
   const payload = req.body;
+  const ctx = req.ctx || {}; // <- per-request context (from headers)
   console.log(">>> Inside createGroup controller, payload:", payload);
 
   let ideonGroupId;
   let ideonData = null;
   let locations = [];
 
-  // Step 1: Try Ideon
-  try {
-    const ideonRes = await ideon.createGroup({
-      group: {
-        company_name: payload.company_name,
-        contact_email: payload.contact_email,
-        contact_name: payload.contact_name,
-        contact_phone: payload.contact_phone,
-        external_id: payload.external_id || `ext-${Date.now()}`,
-        sic_code: payload.sic_code || "0700",
-        chamber_association: payload.chamber_association || false,
-      },
-      locations: [
-        {
-          external_id: `loc-${Date.now()}`,
-          fips_code: payload.fips_code || "36081",
-          name: payload.location_name || "Headquarters",
-          number_of_employees: payload.number_of_employees || 1,
-          primary: true,
-          zip_code: payload.zip_code || "11423",
-        },
-      ],
-    });
-
-    ideonGroupId = ideonRes.data.group.id;
-    ideonData = ideonRes.data;
-    console.log(">>> Ideon group created:", ideonGroupId);
-
-    locations = ideonRes.data.locations.map((loc) => ({
-      external_id: loc.external_id,
-      fips_code: loc.fips_code,
-      name: loc.name,
-      number_of_employees: loc.number_of_employees,
-      primary: loc.primary,
-      zip_code: loc.zip_code,
-      ideon_location_id: loc.id,
-    }));
-  } catch (err) {
-    console.warn(">>> Ideon createGroup failed:", err.response?.status, err.response?.data || err.message);
-
-    ideonGroupId = `mock-${uuidv4()}`;
-    locations = [
+  const ideonPayload = {
+    group: {
+      company_name: payload.company_name,
+      contact_email: payload.contact_email,
+      contact_name: payload.contact_name,
+      contact_phone: payload.contact_phone,
+      external_id: payload.external_id || `ext-${Date.now()}`,
+      sic_code: payload.sic_code || "0700",
+      chamber_association: payload.chamber_association || false,
+    },
+    locations: [
       {
         external_id: `loc-${Date.now()}`,
         fips_code: payload.fips_code || "36081",
@@ -97,6 +67,59 @@ exports.createGroup = async (req, res) => {
         number_of_employees: payload.number_of_employees || 1,
         primary: true,
         zip_code: payload.zip_code || "11423",
+      },
+    ],
+  };
+
+  // Step 1: Only call Ideon if NOT mock and we have a key. Else mock path.
+  if (!ctx.mock && ctx.ideonKey) {
+    try {
+      const ideonRes = await ideon.createGroup(ideonPayload, ctx); // <- pass ctx
+      ideonGroupId = ideonRes.data.group.id;
+      ideonData = ideonRes.data;
+      console.log(">>> Ideon group created:", ideonGroupId);
+
+      locations = ideonRes.data.locations.map((loc) => ({
+        external_id: loc.external_id,
+        fips_code: loc.fips_code,
+        name: loc.name,
+        number_of_employees: loc.number_of_employees,
+        primary: loc.primary,
+        zip_code: loc.zip_code,
+        ideon_location_id: loc.id,
+      }));
+    } catch (err) {
+      console.warn(
+        ">>> Ideon createGroup failed:",
+        err.response?.status,
+        err.response?.data || err.message
+      );
+
+      // fallback to mock if Ideon call fails
+      ideonGroupId = `mock-${uuidv4()}`;
+      locations = [
+        {
+          external_id: `loc-${Date.now()}`,
+          fips_code: ideonPayload.locations[0].fips_code,
+          name: ideonPayload.locations[0].name,
+          number_of_employees: ideonPayload.locations[0].number_of_employees,
+          primary: true,
+          zip_code: ideonPayload.locations[0].zip_code,
+          ideon_location_id: `mock-${uuidv4()}`,
+        },
+      ];
+    }
+  } else {
+    // mock mode (either explicitly mock, or no per-request key provided)
+    ideonGroupId = `mock-${uuidv4()}`;
+    locations = [
+      {
+        external_id: `loc-${Date.now()}`,
+        fips_code: ideonPayload.locations[0].fips_code,
+        name: ideonPayload.locations[0].name,
+        number_of_employees: ideonPayload.locations[0].number_of_employees,
+        primary: true,
+        zip_code: ideonPayload.locations[0].zip_code,
         ideon_location_id: `mock-${uuidv4()}`,
       },
     ];
@@ -120,7 +143,7 @@ exports.createGroup = async (req, res) => {
     return res.status(201).json({
       message: "Group created successfully",
       group: transformGroupDoc(groupDoc),
-      ideon: ideonData, // may be null if fallback
+      ideon: ideonData, // may be null if mock/fallback
     });
   } catch (dbErr) {
     console.error(">>> Error saving group in Mongo:", dbErr.message);

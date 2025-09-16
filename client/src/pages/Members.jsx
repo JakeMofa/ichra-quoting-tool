@@ -494,7 +494,7 @@ export default function Members() {
       {/* Quotes pre-flight controls */}
       <div className="card" style={{ marginBottom: 12 }}>
         <div className="label">Quotes pre-flight</div>
-        <div className="row wrap" style={{ gap: 10 }}>
+        <div className="actionRow" style={{ gap: 10 }}>
           <div className="col" style={{ minWidth: 220 }}>
             <label className="muted">Effective date</label>
             <input

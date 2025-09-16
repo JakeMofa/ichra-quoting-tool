@@ -10,8 +10,8 @@ require("dotenv").config();
 const axios = require("axios");
 const Bottleneck = require("bottleneck");
 
-// --- Config ---
-const IDEON_API_KEY =
+// --- Config (env fallbacks) ---
+const ENV_IDEON_KEY =
   process.env.IDEON_API_KEY || process.env.VERICRED_API_KEY || "";
 const IDEON_BASE_URL =
   process.env.IDEON_BASE_URL || "https://api.ideonapi.com";
@@ -23,7 +23,7 @@ const MIN_DELAY_FALLBACK_MS = Number(process.env.IDEON_MIN_DELAY_MS || 700);
 const MAX_RETRIES = Number(process.env.IDEON_RETRY_MAX || 3);
 const INITIAL_BACKOFF_MS = Number(process.env.IDEON_RETRY_BASE_DELAY_MS || 500);
 
-// Bottleneck config (respects 100 rpm by default)
+// Bottleneck config (respects ~100 rpm by default)
 const limiter = new Bottleneck({
   reservoir: Number(process.env.IDEON_RATE_RESERVOIR || 100), // max tokens
   reservoirRefreshAmount: Number(process.env.IDEON_RATE_RESERVOIR || 100),
@@ -34,19 +34,28 @@ const limiter = new Bottleneck({
 const IDEON_LOG =
   String(process.env.IDEON_LOG || "false").toLowerCase() === "true";
 
-// --- Axios instance ---
-const api = axios.create({
-  baseURL: IDEON_BASE_URL,
-  headers: {
-    "Vericred-Api-Key": IDEON_API_KEY,
-    "Ideon-Api-Key": IDEON_API_KEY,
-    Authorization: `Bearer ${IDEON_API_KEY}`,
-    "Content-Type": "application/json",
-    Accept: "application/json",
-    "Accept-Version": "v6", // pin version
-  },
-  timeout: 15000,
-});
+/**
+ * Build an axios client for:
+ * - per-request key (ctx.ideonKey) when provided, OR
+ * - env key as fallback.
+ */
+function apiForCtx(ctx) {
+  const key = (ctx && ctx.ideonKey) ? String(ctx.ideonKey) : ENV_IDEON_KEY;
+
+  return axios.create({
+    baseURL: IDEON_BASE_URL,
+    headers: {
+      // Ideon accepts any of these; we provide all for compatibility.
+      "Vericred-Api-Key": key,
+      "Ideon-Api-Key": key,
+      Authorization: `Bearer ${key}`,
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      "Accept-Version": "v6", // pin version
+    },
+    timeout: 15000,
+  });
+}
 
 // --- Retry wrapper ---
 async function requestWithRetry(fn, retries = MAX_RETRIES, backoff = INITIAL_BACKOFF_MS) {
@@ -74,52 +83,58 @@ async function requestWithRetry(fn, retries = MAX_RETRIES, backoff = INITIAL_BAC
 }
 
 // --- Low-level HTTP helpers with Bottleneck + retry ---
-async function POST(path, data) {
+// Now accept an optional ctx and build a client per call when provided.
+async function POST(path, data, ctx) {
+  const client = apiForCtx(ctx);
   return limiter.schedule(async () => {
     if (IDEON_LOG) console.log(`[Ideon] POST ${path}`);
-    return requestWithRetry(() => api.post(path, data));
+    return requestWithRetry(() => client.post(path, data));
   });
 }
 
-async function GET(path, params) {
+async function GET(path, params, ctx) {
+  const client = apiForCtx(ctx);
   return limiter.schedule(async () => {
     if (IDEON_LOG) console.log(`[Ideon] GET ${path}`);
-    return requestWithRetry(() => api.get(path, { params }));
+    return requestWithRetry(() => client.get(path, { params }));
   });
 }
 
-// --- Public API ---
+// --- Public API (now accept optional ctx) ---
 // 1) Create Group
-async function createGroup(groupData) {
-  return POST("/groups", groupData);
+async function createGroup(groupData, ctx) {
+  return POST("/groups", groupData, ctx);
 }
 
 // 2) Add Member
-async function addMember(groupId, memberData) {
+async function addMember(groupId, memberData, ctx) {
   if (!groupId) throw new Error("addMember requires groupId");
-  return POST(`/groups/${encodeURIComponent(groupId)}/members`, memberData);
+  return POST(`/groups/${encodeURIComponent(groupId)}/members`, memberData, ctx);
 }
 
 // 3) ICHRA affordability (NESTED under /groups/{id})
-async function startICHRA(groupId, payload) {
+async function startICHRA(groupId, payload, ctx) {
   if (!groupId) throw new Error("startICHRA requires groupId");
   return POST(
     `/groups/${encodeURIComponent(groupId)}/ichra_affordability_calculations`,
-    payload
+    payload,
+    ctx
   );
 }
 
 // 4) Poll ICHRA calc status
-async function getICHRA(calcId) {
+async function getICHRA(calcId, ctx) {
   if (!calcId) throw new Error("getICHRA requires calcId");
-  return GET(`/ichra_affordability_calculations/${encodeURIComponent(calcId)}`);
+  return GET(`/ichra_affordability_calculations/${encodeURIComponent(calcId)}`, undefined, ctx);
 }
 
 // 5) Fetch member-level ICHRA details
-async function getICHRAForMembers(calcId) {
+async function getICHRAForMembers(calcId, ctx) {
   if (!calcId) throw new Error("getICHRAForMembers requires calcId");
   return GET(
-    `/ichra_affordability_calculations/${encodeURIComponent(calcId)}/members`
+    `/ichra_affordability_calculations/${encodeURIComponent(calcId)}/members`,
+    undefined,
+    ctx
   );
 }
 
